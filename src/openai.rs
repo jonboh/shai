@@ -12,21 +12,27 @@ use crate::prompts;
 
 #[derive(Deserialize)]
 struct OpenAIGPTMessage {
+    #[allow(unused)] // needed for deserialization
     pub role: OpenAIGPTRole,
     pub content: String,
 }
 
 #[derive(Deserialize)]
 struct OpenAIGPTMessageEntry {
+    #[allow(unused)] // needed for deserialization
     pub index: u64,
     pub message: OpenAIGPTMessage,
 }
 
 #[derive(Deserialize)]
 struct OpenAIGPTResponse {
+    #[allow(unused)] // needed for deserialization
     pub id: String,
+    #[allow(unused)] // needed for deserialization
     pub object: String,
+    #[allow(unused)] // needed for deserialization
     pub created: u64,
+    #[allow(unused)] // needed for deserialization
     pub model: String,
     pub choices: Vec<OpenAIGPTMessageEntry>,
 }
@@ -40,7 +46,19 @@ enum OpenAIGPTRole {
 }
 
 #[derive(Deserialize, Clone)]
-pub(crate) struct OpenAIGPTModel {}
+pub(crate) enum OpenAIGPTModel {
+    GPT35Turbo,
+    GPT35Turbo16k,
+}
+
+impl OpenAIGPTModel {
+   fn api_name(&self) -> String {
+        match self {
+            OpenAIGPTModel::GPT35Turbo => "gpt-3.5-turbo".to_string(),
+            OpenAIGPTModel::GPT35Turbo16k=>"gpt-3.5-turbo-16k".to_string(),
+        }
+   }
+}
 
 // struct OpenAIGPTCoversation {
 //     system_msg: String,
@@ -78,7 +96,7 @@ impl Model for OpenAIGPTModel {
             Task::Explain => prompts::EXPLAIN_MODEL_TASK,
         };
         let body = json!({
-            "model": "gpt-3.5-turbo-16k",
+            "model": self.api_name(),
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": context_request}
@@ -86,8 +104,6 @@ impl Model for OpenAIGPTModel {
             "temperature": 0
 
         });
-
-        // println!("{}", body);
 
         let response = client.post(url).headers(headers).json(&body).send()?;
 

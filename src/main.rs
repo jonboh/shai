@@ -1,4 +1,4 @@
-use cli_ai_assistant::cli;
+use shai_assistant::cli;
 
 fn main() {
     cli::run().unwrap()

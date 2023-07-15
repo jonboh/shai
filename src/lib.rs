@@ -1,18 +1,21 @@
 mod openai;
 mod context;
 mod model;
-mod ui;
 mod prompts;
 pub mod cli;
 
 use serde::Deserialize;
 use context::Context;
 use openai::OpenAIGPTModel;
-use model::{Model, Task};
+use model::Task;
 
+enum ConfigKind {
+    Ask(AskConfig),
+    Explain(ExplainConfig)
+}
 
 #[derive(Deserialize)]
-struct Config {
+struct AskConfig {
     pwd: Option<()>,
     depth: Option<u32>,
     environment: Option<Vec<String>>,
@@ -20,22 +23,37 @@ struct Config {
     model: ModelKind,
 }
 
-impl Default for Config {
+#[derive(Deserialize)]
+struct ExplainConfig {
+    pwd: Option<()>,
+    depth: Option<u32>,
+    environment: Option<Vec<String>>,
+    model: ModelKind,
+}
+
+impl Default for AskConfig {
     fn default() -> Self {
         Self {
             pwd: None,
             depth: None,
             environment: None,
             programs: None,
-            model: ModelKind::OpenAIGPT(OpenAIGPTModel {}),
+            model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
         }
     }
 }
 
-fn process_config(config: &Config) -> (Context, Box<dyn Model>) {
-    // TODO: this could be a method
-    (Context::new(config), Box::new(config.model.clone()))
+impl Default for ExplainConfig {
+    fn default() -> Self {
+        Self {
+            pwd: None,
+            depth: None,
+            environment: None,
+            model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
+        }
+    }
 }
+
 
 #[derive(Deserialize, Clone)]
 enum ModelKind {

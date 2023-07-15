@@ -1,22 +1,32 @@
+use crate::ConfigKind;
 use std::{io, process::Command};
-use crate::Config;
 
-pub (crate) struct Context {
+pub(crate) struct Context {
     pwd: Option<String>,
     tree: Option<String>,
     environment: Option<String>,
     programs: Option<String>,
 }
 
-impl Context {
-    pub(crate) fn new(config: &Config) -> Context {
-        Context {
-            pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
-            tree: config
-                .depth
-                .and_then(|depth| get_directory_tree(depth).ok()),
-            environment: config.environment.as_ref().map(|env| env.join(",")),
-            programs: config.programs.as_ref().map(|programs| programs.join(",")),
+impl From<ConfigKind> for Context {
+    fn from(value: ConfigKind) -> Self {
+        match value {
+            ConfigKind::Ask(config) => Context {
+                pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
+                tree: config
+                    .depth
+                    .and_then(|depth| get_directory_tree(depth).ok()),
+                environment: config.environment.as_ref().map(|env| env.join(",")),
+                programs: config.programs.as_ref().map(|programs| programs.join(",")),
+            },
+            ConfigKind::Explain(config) => Context {
+                pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
+                tree: config
+                    .depth
+                    .and_then(|depth| get_directory_tree(depth).ok()),
+                environment: config.environment.as_ref().map(|env| env.join(",")),
+                programs: None,
+            },
         }
     }
 }
@@ -29,7 +39,6 @@ impl From<Context> for String {
             + &value.programs.map(|bins| format!("You have the following programs installed in the system, you should only use these programs to accomplish the <task>: {bins}\n")).unwrap_or("".to_string())
     }
 }
-
 
 fn get_directory_tree(depth: u32) -> Result<String, io::Error> {
     let mut command = Command::new("tree");
