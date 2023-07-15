@@ -1,0 +1,98 @@
+use std::time::Duration;
+use serde::Deserialize;
+use serde_json::json;
+
+use reqwest::blocking::{Client, ClientBuilder};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+
+use crate::build_context_request;
+use crate::model::{Model, Task};
+use crate::context::Context;
+use crate::prompts;
+
+#[derive(Deserialize)]
+struct OpenAIGPTMessage {
+    pub role: OpenAIGPTRole,
+    pub content: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAIGPTMessageEntry {
+    pub index: u64,
+    pub message: OpenAIGPTMessage,
+}
+
+#[derive(Deserialize)]
+struct OpenAIGPTResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<OpenAIGPTMessageEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum OpenAIGPTRole {
+    System,
+    Assistant,
+    User,
+}
+
+#[derive(Deserialize, Clone)]
+pub(crate) struct OpenAIGPTModel {}
+
+// struct OpenAIGPTCoversation {
+//     system_msg: String,
+//     user_msg: String
+// }
+
+impl Model for OpenAIGPTModel {
+    // TODO: switch ask/explain logic further up
+    fn send(
+        &self,
+        request: String,
+        context: Context,
+        task: Task,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let client: Client = ClientBuilder::new()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+
+        let url = "https://api.openai.com/v1/chat/completions";
+        let api_key = std::env::var("OPENAI_API_KEY")
+            .expect("You need to set OPENAI_API_KEY to use this model");
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", api_key))?,
+        );
+
+        let context_request = build_context_request(request, context);
+
+        
+        let system_content = match task {
+            Task::GenerateCommand => prompts::ASK_MODEL_TASK,
+            Task::Explain => prompts::EXPLAIN_MODEL_TASK,
+        };
+        let body = json!({
+            "model": "gpt-3.5-turbo-16k",
+            "messages": [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": context_request}
+            ],
+            "temperature": 0
+
+        });
+
+        // println!("{}", body);
+
+        let response = client.post(url).headers(headers).json(&body).send()?;
+
+        let response: OpenAIGPTResponse = response.json().unwrap(); // TODO: hanle errors, timeout etc
+        let response_text = response.choices[0].message.content.clone();
+        Ok(response_text)
+    }
+}
