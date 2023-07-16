@@ -8,11 +8,22 @@ use serde::Deserialize;
 use context::Context;
 use openai::OpenAIGPTModel;
 use model::Task;
+use thiserror::Error;
 
 enum ConfigKind {
     Ask(AskConfig),
     Explain(ExplainConfig)
 }
+
+impl ConfigKind {
+    fn model(&self) -> &ModelKind {
+        match self {
+            ConfigKind::Ask(config) => &config.model,
+            ConfigKind::Explain(config) => &config.model,
+        }
+    }
+}
+
 
 #[derive(Deserialize)]
 struct AskConfig {
@@ -62,17 +73,21 @@ enum ModelKind {
     // Local // ?
 }
 
-impl model::Model for ModelKind {
-    fn send(
-        &self,
-        request: String,
-        context: Context,
-        task: Task,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        use ModelKind::*;
-        match self {
-            OpenAIGPT(model) => model.send(request, context, task),
-        }
+#[derive(Debug, Clone, Error)]
+enum ModelError {
+    #[error("ModelError")]
+    Error // TODO:
+}
+
+async fn model_request(
+    model: ModelKind,
+    request: String,
+    context: Context,
+    task: Task,
+) -> Result<String, ModelError> {
+    use ModelKind::*;
+    match model {
+        OpenAIGPT(model) => model.send(request, context, task).await.map_err(|_| ModelError::Error),
     }
 }
 

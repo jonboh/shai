@@ -1,6 +1,7 @@
 use crate::ConfigKind;
 use std::{io, process::Command};
 
+#[derive(Clone)]
 pub(crate) struct Context {
     pwd: Option<String>,
     tree: Option<String>,

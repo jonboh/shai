@@ -1,5 +1,6 @@
 use shai_assistant::cli;
 
-fn main() {
-    cli::run().unwrap()
+#[tokio::main]
+async fn main() {
+    cli::run().await.unwrap()
 }

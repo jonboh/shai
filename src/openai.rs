@@ -2,11 +2,11 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::json;
 
-use reqwest::blocking::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 
 use crate::build_context_request;
-use crate::model::{Model, Task};
+use crate::model::{Task};
 use crate::context::Context;
 use crate::prompts;
 
@@ -65,17 +65,22 @@ impl OpenAIGPTModel {
 //     user_msg: String
 // }
 
-impl Model for OpenAIGPTModel {
+#[derive(Debug, Clone)]
+pub enum OpenAIError {
+    Error // TODO:
+}
+
+impl OpenAIGPTModel {
     // TODO: switch ask/explain logic further up
-    fn send(
+    pub async fn send(
         &self,
         request: String,
         context: Context,
         task: Task,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    ) -> Result<String, OpenAIError> {
         let client: Client = ClientBuilder::new()
             .timeout(Duration::from_secs(60))
-            .build()?;
+            .build().map_err(|_| OpenAIError::Error)?;
 
         let url = "https://api.openai.com/v1/chat/completions";
         let api_key = std::env::var("OPENAI_API_KEY")
@@ -85,7 +90,7 @@ impl Model for OpenAIGPTModel {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key))?,
+            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|_| OpenAIError::Error)?,
         );
 
         let context_request = build_context_request(request, context);
@@ -105,9 +110,9 @@ impl Model for OpenAIGPTModel {
 
         });
 
-        let response = client.post(url).headers(headers).json(&body).send()?;
+        let response = client.post(url).headers(headers).json(&body).send().await.map_err(|_| OpenAIError::Error)?;
 
-        let response: OpenAIGPTResponse = response.json().unwrap(); // TODO: hanle errors, timeout etc
+        let response: OpenAIGPTResponse = response.json().await.map_err(|_| OpenAIError::Error)?;
         let response_text = response.choices[0].message.content.clone();
         Ok(response_text)
     }
