@@ -149,6 +149,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+enum WriteBuffer {
+    Yes,
+    No
+}
+
 enum MainLoopAction {
     Exit,
     AcceptStdinInput,
@@ -257,8 +262,15 @@ impl<'t> ShaiUI<'t> {
             .and_then(|file| fs::read_to_string(file).ok())
             .unwrap_or_default();
         self.textarea.insert_str(&cli_text);
-        self.mainloop().await?;
+        let response = self.mainloop().await?;
 
+        if let ShaiArgs::Ask(_) = self.args {
+            if let Some(file) = &self.args.edit_file() {
+                if let WriteBuffer::Yes = response {
+                    fs::write(file, &self.explanation_paragraph.0)?
+                }
+            }
+        }
         disable_raw_mode()?;
         crossterm::execute!(
             self.term.backend_mut(),
@@ -269,7 +281,7 @@ impl<'t> ShaiUI<'t> {
         Ok(())
     }
 
-    async fn mainloop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn mainloop(&mut self) -> Result<WriteBuffer, Box<dyn std::error::Error>> {
         let mut state = MainLoopAction::AcceptStdinInput;
         loop {
             self.term.draw(|f| {
@@ -282,8 +294,8 @@ impl<'t> ShaiUI<'t> {
             match state {
                 MainLoopAction::AcceptStdinInput => {
                     match crossterm::event::read()?.into() {
-                        Input { key: Key::Esc, .. } => state = MainLoopAction::Exit,
-                        // TODO: add \n on crtl+Enter
+                        Input { key: Key::Esc, .. } => return Ok(WriteBuffer::No),
+                        Input { key: Key::Char('a'), ctrl:true, ..} => return Ok(WriteBuffer::Yes),
                         Input {
                             key: Key::Enter, ..
                         } => state = MainLoopAction::SendRequest,
@@ -298,12 +310,12 @@ impl<'t> ShaiUI<'t> {
                     state = match self.send_request().await? {
                         RequestState::Exit => MainLoopAction::Exit,
                         _ => MainLoopAction::AcceptStdinInput,
-                    }
+                    };
                 }
-                MainLoopAction::Exit => break,
+                MainLoopAction::Exit => return Ok(WriteBuffer::No), // shouldn't here here
+                                                                       // anyway
             }
         }
-        Ok(())
     }
 
     async fn send_request(&mut self) -> Result<RequestState, Box<dyn std::error::Error>> {
@@ -369,7 +381,6 @@ impl<'t> ShaiUI<'t> {
             }
             _ => (),
         }
-
         Ok(state)
     }
 
@@ -380,11 +391,6 @@ impl<'t> ShaiUI<'t> {
         );
         if self.args.write_stdout() {
             println!("{response}");
-        }
-        if let ShaiArgs::Ask(_) = self.args {
-            if let Some(file) = &self.args.edit_file() {
-                fs::write(file, response)?;
-            }
         }
         Ok(())
     }
