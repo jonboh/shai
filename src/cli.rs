@@ -9,6 +9,7 @@ use crossterm::event::{poll, DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use futures::StreamExt;
 use tui::backend::CrosstermBackend;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::Style;
@@ -19,7 +20,10 @@ use tui_textarea::{Input, Key, TextArea};
 use crate::context::Context;
 use crate::model::Task;
 use crate::openai::OpenAIGPTModel;
-use crate::{model_request, AskConfig, ConfigKind, ExplainConfig, ModelKind};
+use crate::{
+    model_request, model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelError,
+    ModelKind,
+};
 
 #[derive(Parser, Clone)]
 #[command(name = "shai")]
@@ -151,7 +155,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 enum WriteBuffer {
     Yes,
-    No
+    No,
 }
 
 enum MainLoopAction {
@@ -164,7 +168,7 @@ enum RequestState {
     AcceptMore,
     Cancel,
     Exit,
-    Finished,
+    Streaming,
 }
 
 #[derive(Copy, Clone)]
@@ -222,11 +226,7 @@ impl<'t> ShaiUI<'t> {
             ShaiArgs::Explain(_) => "What command should shai explain?",
         };
         let mut textarea = TextArea::default();
-        textarea.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title),
-        );
+        textarea.set_block(Block::default().borders(Borders::ALL).title(title));
         textarea.set_cursor_line_style(Style::default());
         let text = "";
         let explanation_paragraph = (
@@ -270,7 +270,12 @@ impl<'t> ShaiUI<'t> {
                     fs::write(file, &self.explanation_paragraph.0)?
                 }
             }
+            if self.args.write_stdout() {
+                let response = &self.explanation_paragraph.0;
+                println!("{response}");
+            }
         }
+
         disable_raw_mode()?;
         crossterm::execute!(
             self.term.backend_mut(),
@@ -295,7 +300,11 @@ impl<'t> ShaiUI<'t> {
                 MainLoopAction::AcceptStdinInput => {
                     match crossterm::event::read()?.into() {
                         Input { key: Key::Esc, .. } => return Ok(WriteBuffer::No),
-                        Input { key: Key::Char('a'), ctrl:true, ..} => return Ok(WriteBuffer::Yes),
+                        Input {
+                            key: Key::Char('a'),
+                            ctrl: true,
+                            ..
+                        } => return Ok(WriteBuffer::Yes),
                         Input {
                             key: Key::Enter, ..
                         } => state = MainLoopAction::SendRequest,
@@ -313,7 +322,7 @@ impl<'t> ShaiUI<'t> {
                     };
                 }
                 MainLoopAction::Exit => return Ok(WriteBuffer::No), // shouldn't here here
-                                                                       // anyway
+                                                                    // anyway
             }
         }
     }
@@ -327,7 +336,7 @@ impl<'t> ShaiUI<'t> {
         };
         let context = Context::from(config);
         let user_prompt = self.textarea.lines().join("\n");
-        let request_task = tokio::spawn(model_request(
+        let request_task = tokio::spawn(model_stream_request(
             model.clone(),
             user_prompt,
             context.clone(),
@@ -357,11 +366,14 @@ impl<'t> ShaiUI<'t> {
                         }
                     }
                     if request_task.is_finished() {
-                        state = RequestState::Finished;
+                        state = RequestState::Streaming;
+                        self.clear_response();
                     }
                 }
                 RequestState::Cancel => break,
-                RequestState::Finished => break,
+                RequestState::Streaming => {
+                    break;
+                },
                 RequestState::Exit => break,
             }
             fidget = fidget.next_state();
@@ -369,9 +381,20 @@ impl<'t> ShaiUI<'t> {
                 Self::create_explanation_paragraph(self.explanation_paragraph.0.clone(), fidget);
         }
         match state {
-            RequestState::Finished => {
-                let response = request_task.await??;
-                self.show_response(&response)?;
+            RequestState::Streaming => {
+                let mut response = request_task.await?.map_err(|_| ModelError::Error)?; // FIX:
+                let mut count = 0;
+                while let Some(message) = response.next().await {
+                    self.append_message_response(&message);
+
+                    // TODO: we need to also listen for input here
+                    self.term.draw(|f| {
+                        let chunks = self.layout.split(f.size());
+                        let widget = self.textarea.widget();
+                        f.render_widget(widget, chunks[0]);
+                        f.render_widget(self.explanation_paragraph.1.clone(), chunks[1]);
+                    })?;
+                }
             }
             RequestState::Cancel => {
                 self.explanation_paragraph.1 = Self::create_explanation_paragraph(
@@ -384,14 +407,20 @@ impl<'t> ShaiUI<'t> {
         Ok(state)
     }
 
-    fn show_response(&mut self, response: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn clear_response(&mut self) {
         self.explanation_paragraph = (
-            response.to_string(),
-            Self::create_explanation_paragraph(response.to_string(), ShaiProgress::Waiting),
+            "".to_string(),
+            Self::create_explanation_paragraph("".to_string(), ShaiProgress::Waiting),
         );
-        if self.args.write_stdout() {
-            println!("{response}");
-        }
-        Ok(())
+
+    }
+
+    fn append_message_response(&mut self, response: &str) {
+        let prev = &self.explanation_paragraph.0;
+        let new = format!("{}{}", prev , response.to_string());
+        self.explanation_paragraph = (
+            new.clone(),
+            Self::create_explanation_paragraph(new, ShaiProgress::Waiting),
+        );
     }
 }
