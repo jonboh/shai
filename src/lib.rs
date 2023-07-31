@@ -1,20 +1,19 @@
-mod openai;
+pub mod cli;
 mod context;
 mod model;
+mod openai;
 mod prompts;
-pub mod cli;
 
-
-use futures::Stream;
-use serde::Deserialize;
 use context::Context;
-use openai::{OpenAIGPTModel, OpenAIError};
+use futures::Stream;
 use model::Task;
+use openai::{OpenAIError, OpenAIGPTModel};
+use serde::Deserialize;
 use thiserror::Error;
 
 enum ConfigKind {
     Ask(AskConfig),
-    Explain(ExplainConfig)
+    Explain(ExplainConfig),
 }
 
 impl ConfigKind {
@@ -25,7 +24,6 @@ impl ConfigKind {
         }
     }
 }
-
 
 #[derive(Deserialize)]
 struct AskConfig {
@@ -67,7 +65,6 @@ impl Default for ExplainConfig {
     }
 }
 
-
 #[derive(Deserialize, Clone)]
 enum ModelKind {
     OpenAIGPT(OpenAIGPTModel),
@@ -78,7 +75,7 @@ enum ModelKind {
 #[derive(Debug, Clone, Error)]
 enum ModelError {
     #[error("ModelError")]
-    Error // TODO:
+    Error, // TODO:
 }
 
 #[allow(unused)]
@@ -90,7 +87,10 @@ async fn model_request(
 ) -> Result<String, ModelError> {
     use ModelKind::*;
     match model {
-        OpenAIGPT(model) => model.send(request, context, task).await.map_err(|_| ModelError::Error),
+        OpenAIGPT(model) => model
+            .send(request, context, task)
+            .await
+            .map_err(|_| ModelError::Error),
     }
 }
 
@@ -99,7 +99,7 @@ async fn model_stream_request(
     request: String,
     context: Context,
     task: Task,
-) -> Result< impl Stream<Item =String>, OpenAIError> {
+) -> Result<impl Stream<Item = String>, OpenAIError> {
     use ModelKind::*;
     match model {
         OpenAIGPT(model) => model.send_streaming(request, context, task).await,
@@ -112,7 +112,10 @@ fn build_context_request(request: String, context: Context) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::{model_stream_request, ModelKind::OpenAIGPT, openai::OpenAIGPTModel::GPT35Turbo, context::Context, ConfigKind, AskConfig, model::Task};
+    use crate::{
+        context::Context, model::Task, model_stream_request, openai::OpenAIGPTModel::GPT35Turbo,
+        AskConfig, ConfigKind, ModelKind::OpenAIGPT,
+    };
     use futures_util::StreamExt;
 
     #[tokio::test]

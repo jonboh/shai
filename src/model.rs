@@ -5,5 +5,5 @@
 
 pub(crate) enum Task {
     GenerateCommand,
-    Explain
+    Explain,
 }

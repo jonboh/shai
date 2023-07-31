@@ -1,4 +1,3 @@
-
 use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
@@ -7,7 +6,7 @@ use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, ClientBuilder};
 
-use eventsource_stream::{Eventsource};
+use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 
 use crate::build_context_request;
@@ -85,7 +84,8 @@ impl OpenAIGPTModel {
     ) -> Result<String, OpenAIError> {
         let client: Client = ClientBuilder::new()
             .timeout(Duration::from_secs(60))
-            .build().map_err(|_| OpenAIError::Error)?;
+            .build()
+            .map_err(|_| OpenAIError::Error)?;
 
         let url = "https://api.openai.com/v1/chat/completions";
         let api_key = std::env::var("OPENAI_API_KEY")
@@ -95,11 +95,11 @@ impl OpenAIGPTModel {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|_| OpenAIError::Error)?,
+            HeaderValue::from_str(&format!("Bearer {}", api_key))
+                .map_err(|_| OpenAIError::Error)?,
         );
 
         let context_request = build_context_request(request, context);
-
 
         let system_content = match task {
             Task::GenerateCommand => prompts::ASK_MODEL_TASK,
@@ -114,14 +114,19 @@ impl OpenAIGPTModel {
             "temperature": 0
         });
 
-        let response = client.post(url).headers(headers).json(&body).send().await.map_err(|_| OpenAIError::Error)?;
+        let response = client
+            .post(url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| OpenAIError::Error)?;
 
         let response: Response = response.json().await.map_err(|_| OpenAIError::Error)?;
         let response_text = response.choices[0].message.content.clone();
         Ok(response_text)
     }
 }
-
 
 #[derive(Deserialize)]
 struct Choice {
@@ -142,11 +147,10 @@ enum FinishReason {
     Length,
 }
 
-
 #[derive(Deserialize)]
 struct ResponseChunk {
     #[allow(unused)]
-    id : String,
+    id: String,
     #[allow(unused)]
     object: String,
     #[allow(unused)]
@@ -160,11 +164,14 @@ struct ResponseChunk {
 #[serde(rename_all = "lowercase", untagged)]
 enum MessageChunk {
     #[allow(unused)]
-    Role{role: String},
-    Content{content:String},
-    Stop{},
+    Role {
+        role: String,
+    },
+    Content {
+        content: String,
+    },
+    Stop {},
 }
-
 
 impl OpenAIGPTModel {
     pub async fn send_streaming(
@@ -172,8 +179,7 @@ impl OpenAIGPTModel {
         request: String,
         context: Context,
         task: Task,
-    ) -> Result< impl Stream<Item = String>, OpenAIError,
-    > {
+    ) -> Result<impl Stream<Item = String>, OpenAIError> {
         let client: Client = ClientBuilder::new()
             .timeout(Duration::from_secs(60))
             .build()
@@ -219,11 +225,14 @@ impl OpenAIGPTModel {
         let message_stream = raw_response_stream.map(|response| {
             let data = response.expect("interrupted stream").data; // FIX: expect used for non-bug failure condition
             if data == "[DONE]" {
-                return "".to_string()
-            }
-            else {
-                match &serde_json::from_str::<ResponseChunk>(&data).unwrap().choices[0].delta {
-                    MessageChunk::Content{content: msg} => msg.to_string(),
+                "".to_string()
+            } else {
+                match &serde_json::from_str::<ResponseChunk>(&data)
+                    .unwrap()
+                    .choices[0]
+                    .delta
+                {
+                    MessageChunk::Content { content: msg } => msg.to_string(),
                     _ => "".to_string(),
                 }
             }
@@ -234,7 +243,7 @@ impl OpenAIGPTModel {
 
 #[cfg(test)]
 mod tests {
-    use super::{ResponseChunk, Choice, MessageChunk};
+    use super::{Choice, MessageChunk, ResponseChunk};
 
     #[test]
     fn empty_delta_deserialization() {
@@ -250,7 +259,7 @@ mod tests {
 
     #[test]
     fn stop_message() {
-        let raw_response = r#"{"id":"chatcmpl","object":"chat.completion.chunk","created":9999,"model":"gpt-3.5-turbo-0613","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#;
+        let raw_response = r#"{"id":"chatcmpl-7hjUwKyug0y6n4luq7XJf5FVKLuHQ","object":"chat.completion.chunk","created":1690657354,"model":"gpt-3.5-turbo-0613","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#;
         serde_json::from_str::<ResponseChunk>(raw_response).unwrap();
     }
 }

@@ -9,7 +9,7 @@ use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use futures::{StreamExt, Stream};
+use futures::{Stream, StreamExt};
 use tui::backend::CrosstermBackend;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::Style;
@@ -20,10 +20,7 @@ use tui_textarea::{Input, Key, TextArea};
 use crate::context::Context;
 use crate::model::Task;
 use crate::openai::OpenAIGPTModel;
-use crate::{
-     model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelError,
-    ModelKind,
-};
+use crate::{model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelError, ModelKind};
 
 #[derive(Parser, Clone)]
 #[command(name = "shai")]
@@ -158,11 +155,6 @@ enum WriteBuffer {
     No,
 }
 
-enum MainLoopAction {
-    Exit,
-    AcceptStdinInput,
-    SendRequest,
-}
 
 enum RequestState {
     WaitRequest,
@@ -270,12 +262,9 @@ impl<'t> ShaiUI<'t> {
                     fs::write(file, &self.explanation_paragraph.0)?
                 }
             }
-            if self.args.write_stdout() {
-                let response = &self.explanation_paragraph.0;
-                println!("{response}");
-            }
         }
 
+        // restore terminal mode
         disable_raw_mode()?;
         crossterm::execute!(
             self.term.backend_mut(),
@@ -283,41 +272,34 @@ impl<'t> ShaiUI<'t> {
             DisableMouseCapture
         )?;
         self.term.show_cursor()?;
+
+        if self.args.write_stdout() {
+            let response = &self.explanation_paragraph.0;
+            println!("{response}");
+        }
         Ok(())
     }
 
     async fn mainloop(&mut self) -> Result<WriteBuffer, Box<dyn std::error::Error>> {
-        let mut state = MainLoopAction::AcceptStdinInput;
         loop {
             self.draw()?;
 
-            match state {
-                MainLoopAction::AcceptStdinInput => {
-                    match crossterm::event::read()?.into() {
-                        Input { key: Key::Esc, .. } => return Ok(WriteBuffer::No),
-                        Input {
-                            key: Key::Char('a'),
-                            ctrl: true,
-                            ..
-                        } => return Ok(WriteBuffer::Yes),
-                        Input {
-                            key: Key::Enter, ..
-                        } => state = MainLoopAction::SendRequest,
+            match crossterm::event::read()?.into() {
+                Input { key: Key::Esc, .. } => return Ok(WriteBuffer::No),
+                Input {
+                    key: Key::Char('a'),
+                    ctrl: true,
+                    ..
+                } => return Ok(WriteBuffer::Yes),
+                Input {
+                    key: Key::Enter, ..
+                } => if let RequestState::Exit = self.send_request().await? {
+                    return Ok(WriteBuffer::No)
+                },
 
-                        input => {
-                            self.textarea.input(input);
-                            // action = MainLoopAction::AcceptMore // redundant
-                        }
-                    }
+                input => {
+                    self.textarea.input(input);
                 }
-                MainLoopAction::SendRequest => {
-                    state = match self.send_request().await? {
-                        RequestState::Exit => MainLoopAction::Exit,
-                        _ => MainLoopAction::AcceptStdinInput,
-                    };
-                }
-                MainLoopAction::Exit => return Ok(WriteBuffer::No), // shouldn't here here
-                                                                    // anyway
             }
         }
     }
@@ -370,9 +352,13 @@ impl<'t> ShaiUI<'t> {
                         self.clear_response();
                     }
                 }
-                RequestState::Streaming => return self.stream_response(request_task.await?.map_err(|_| ModelError::Error)?).await, // FIX:
+                RequestState::Streaming => {
+                    return self
+                        .stream_response(request_task.await?.map_err(|_| ModelError::Error)?)
+                        .await
+                } // FIX:
                 RequestState::Cancel => return Ok(RequestState::Cancel),
-                RequestState::Exit  => return Ok(RequestState::Exit),
+                RequestState::Exit => return Ok(RequestState::Exit),
             }
             fidget = fidget.next_state();
             self.explanation_paragraph.1 =
@@ -381,7 +367,10 @@ impl<'t> ShaiUI<'t> {
     }
 
     // TODO: is it safe to state Unpin here?
-    async fn stream_response(&mut self, mut response_stream: impl Stream<Item=String> + Unpin) -> Result<RequestState, Box<dyn std::error::Error>> {
+    async fn stream_response(
+        &mut self,
+        mut response_stream: impl Stream<Item = String> + Unpin,
+    ) -> Result<RequestState, Box<dyn std::error::Error>> {
         while let Some(message) = response_stream.next().await {
             self.draw()?;
             self.append_message_response(&message);
@@ -396,8 +385,6 @@ impl<'t> ShaiUI<'t> {
                     _ => (),
                 }
             }
-
-
         }
         Ok(RequestState::Streaming)
     }
@@ -407,12 +394,11 @@ impl<'t> ShaiUI<'t> {
             "".to_string(),
             Self::create_explanation_paragraph("".to_string(), ShaiProgress::Waiting),
         );
-
     }
 
     fn append_message_response(&mut self, response: &str) {
         let prev = &self.explanation_paragraph.0;
-        let new = format!("{}{}", prev , response.to_string());
+        let new = format!("{}{}", prev, response);
         self.explanation_paragraph = (
             new.clone(),
             Self::create_explanation_paragraph(new, ShaiProgress::Waiting),
