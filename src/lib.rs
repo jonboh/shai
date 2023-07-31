@@ -4,7 +4,7 @@ mod model;
 mod prompts;
 pub mod cli;
 
-use bytes::Bytes;
+
 use futures::Stream;
 use serde::Deserialize;
 use context::Context;
@@ -81,6 +81,7 @@ enum ModelError {
     Error // TODO:
 }
 
+#[allow(unused)]
 async fn model_request(
     model: ModelKind,
     request: String,

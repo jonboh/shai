@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use crossterm::event::{poll, DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use futures::StreamExt;
+use futures::{StreamExt, Stream};
 use tui::backend::CrosstermBackend;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::Style;
@@ -21,7 +21,7 @@ use crate::context::Context;
 use crate::model::Task;
 use crate::openai::OpenAIGPTModel;
 use crate::{
-    model_request, model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelError,
+     model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelError,
     ModelKind,
 };
 
@@ -165,7 +165,7 @@ enum MainLoopAction {
 }
 
 enum RequestState {
-    AcceptMore,
+    WaitRequest,
     Cancel,
     Exit,
     Streaming,
@@ -289,12 +289,7 @@ impl<'t> ShaiUI<'t> {
     async fn mainloop(&mut self) -> Result<WriteBuffer, Box<dyn std::error::Error>> {
         let mut state = MainLoopAction::AcceptStdinInput;
         loop {
-            self.term.draw(|f| {
-                let chunks = self.layout.split(f.size());
-                let widget = self.textarea.widget();
-                f.render_widget(widget, chunks[0]);
-                f.render_widget(self.explanation_paragraph.1.clone(), chunks[1]);
-            })?;
+            self.draw()?;
 
             match state {
                 MainLoopAction::AcceptStdinInput => {
@@ -327,6 +322,16 @@ impl<'t> ShaiUI<'t> {
         }
     }
 
+    fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.term.draw(|f| {
+            let chunks = self.layout.split(f.size());
+            let widget = self.textarea.widget();
+            f.render_widget(widget, chunks[0]);
+            f.render_widget(self.explanation_paragraph.1.clone(), chunks[1]);
+        })?;
+        Ok(())
+    }
+
     async fn send_request(&mut self) -> Result<RequestState, Box<dyn std::error::Error>> {
         let config = ConfigKind::from(self.args.clone());
         let model = config.model().clone();
@@ -342,19 +347,14 @@ impl<'t> ShaiUI<'t> {
             context.clone(),
             task,
         ));
-        let mut state = RequestState::AcceptMore;
+        let mut state = RequestState::WaitRequest;
         let mut fidget = ShaiProgress::Waiting;
-        loop {
-            self.term.draw(|f| {
-                let chunks = self.layout.split(f.size());
-                let widget = self.textarea.widget();
-                f.render_widget(widget, chunks[0]);
-                f.render_widget(self.explanation_paragraph.1.clone(), chunks[1]);
-            })?;
 
+        loop {
+            self.draw()?;
             match state {
-                RequestState::AcceptMore => {
-                    if poll(Duration::from_millis(100))? {
+                RequestState::WaitRequest => {
+                    if crossterm::event::poll(Duration::from_millis(100))? {
                         match crossterm::event::read()?.into() {
                             Input { key: Key::Esc, .. } => state = RequestState::Exit,
                             Input {
@@ -370,41 +370,36 @@ impl<'t> ShaiUI<'t> {
                         self.clear_response();
                     }
                 }
-                RequestState::Cancel => break,
-                RequestState::Streaming => {
-                    break;
-                },
-                RequestState::Exit => break,
+                RequestState::Streaming => return self.stream_response(request_task.await?.map_err(|_| ModelError::Error)?).await, // FIX:
+                RequestState::Cancel => return Ok(RequestState::Cancel),
+                RequestState::Exit  => return Ok(RequestState::Exit),
             }
             fidget = fidget.next_state();
             self.explanation_paragraph.1 =
                 Self::create_explanation_paragraph(self.explanation_paragraph.0.clone(), fidget);
         }
-        match state {
-            RequestState::Streaming => {
-                let mut response = request_task.await?.map_err(|_| ModelError::Error)?; // FIX:
-                let mut count = 0;
-                while let Some(message) = response.next().await {
-                    self.append_message_response(&message);
+    }
 
-                    // TODO: we need to also listen for input here
-                    self.term.draw(|f| {
-                        let chunks = self.layout.split(f.size());
-                        let widget = self.textarea.widget();
-                        f.render_widget(widget, chunks[0]);
-                        f.render_widget(self.explanation_paragraph.1.clone(), chunks[1]);
-                    })?;
+    // TODO: is it safe to state Unpin here?
+    async fn stream_response(&mut self, mut response_stream: impl Stream<Item=String> + Unpin) -> Result<RequestState, Box<dyn std::error::Error>> {
+        while let Some(message) = response_stream.next().await {
+            self.draw()?;
+            self.append_message_response(&message);
+            if crossterm::event::poll(Duration::from_millis(100))? {
+                match crossterm::event::read()?.into() {
+                    Input { key: Key::Esc, .. } => return Ok(RequestState::Exit),
+                    Input {
+                        key: Key::Char('c'),
+                        ctrl: true,
+                        ..
+                    } => return Ok(RequestState::Cancel),
+                    _ => (),
                 }
             }
-            RequestState::Cancel => {
-                self.explanation_paragraph.1 = Self::create_explanation_paragraph(
-                    self.explanation_paragraph.0.clone(),
-                    ShaiProgress::Waiting,
-                );
-            }
-            _ => (),
+
+
         }
-        Ok(state)
+        Ok(RequestState::Streaming)
     }
 
     fn clear_response(&mut self) {

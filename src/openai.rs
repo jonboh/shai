@@ -1,4 +1,4 @@
-use bytes::Bytes;
+
 use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
@@ -7,7 +7,7 @@ use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, ClientBuilder};
 
-use eventsource_stream::{EventStream, Eventsource};
+use eventsource_stream::{Eventsource};
 use futures_util::StreamExt;
 
 use crate::build_context_request;
@@ -126,8 +126,10 @@ impl OpenAIGPTModel {
 #[derive(Deserialize)]
 struct Choice {
     // TODO: i think you are skiping deltas
+    #[allow(unused)]
     index: u64,
     delta: MessageChunk,
+    #[allow(unused)]
     finish_reason: Option<FinishReason>,
 }
 
@@ -143,9 +145,13 @@ enum FinishReason {
 
 #[derive(Deserialize)]
 struct ResponseChunk {
+    #[allow(unused)]
     id : String,
+    #[allow(unused)]
     object: String,
+    #[allow(unused)]
     created: u64,
+    #[allow(unused)]
     model: String,
     choices: Vec<Choice>,
 }
@@ -153,6 +159,7 @@ struct ResponseChunk {
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase", untagged)]
 enum MessageChunk {
+    #[allow(unused)]
     Role{role: String},
     Content{content:String},
     Stop{},
