@@ -130,7 +130,6 @@ impl OpenAIGPTModel {
 
 #[derive(Deserialize)]
 struct Choice {
-    // TODO: i think you are skiping deltas
     #[allow(unused)]
     index: u64,
     delta: MessageChunk,
