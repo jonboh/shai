@@ -319,15 +319,7 @@ impl<'t> ShaiUI<'t> {
             .and_then(|file| fs::read_to_string(file).ok())
             .unwrap_or_default();
         self.textarea.insert_str(&cli_text);
-        let response = self.mainloop().await?;
-
-        if let ShaiArgs::Ask(_) = self.args {
-            if let Some(file) = &self.args.edit_file() {
-                if let WriteBuffer::Yes = response {
-                    fs::write(file, &self.main_response.response)?
-                }
-            }
-        }
+        let response = self.mainloop().await;
 
         // restore terminal mode
         disable_raw_mode()?;
@@ -338,6 +330,13 @@ impl<'t> ShaiUI<'t> {
         )?;
         self.term.show_cursor()?;
 
+        if let ShaiArgs::Ask(_) = self.args {
+            if let Some(file) = &self.args.edit_file() {
+                if let WriteBuffer::Yes = response? {
+                    fs::write(file, &self.main_response.response)?
+                }
+            }
+        }
         if self.args.write_stdout() {
             let response = &self.main_response.response;
             println!("{response}");
