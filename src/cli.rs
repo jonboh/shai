@@ -274,16 +274,15 @@ impl Layout {
 }
 
 impl<'t> ShaiUI<'t> {
-    pub fn new(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
+    /// This function initializes Shai and eases disabling terminal raw mode in all circumstances
+    fn initialization(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
         let mut stdout = io::stdout().lock();
-
-        enable_raw_mode()?;
         crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let term = Terminal::new(backend)?;
 
         let title = match args {
-            ShaiArgs::Ask(_) => "What shold shai's command do?",
+            ShaiArgs::Ask(_) => "What should shai's command do?",
             ShaiArgs::Explain(_) => "What command should shai explain?",
         };
         let mut textarea = TextArea::default();
@@ -309,6 +308,17 @@ impl<'t> ShaiUI<'t> {
             main_response,
             auxiliary_response,
         })
+    }
+
+    pub fn new(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
+        enable_raw_mode().expect("Terminal needs to be set in raw mode for Shai UI to work");
+        match Self::initialization(args) {
+            Ok(shai) => Ok(shai),
+            Err(err) => {
+                disable_raw_mode()?;
+                Err(err)
+            }
+        }
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
