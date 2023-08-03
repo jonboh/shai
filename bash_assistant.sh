@@ -1,7 +1,7 @@
 _ask_assistant() {
     tmpf="$(mktemp)"
     printf '%s\n' "$READLINE_LINE" > "$tmpf"
-    "./target/debug/shai-assistant" "ask" "--model" "open-aigpt35turbo" "--edit-file" "$tmpf"
+    "shai" "ask" "--model" "open-aigpt35turbo" "--edit-file" "$tmpf"
     READLINE_LINE="$(<"$tmpf")"
     READLINE_POINT="${#READLINE_LINE}"
     rm -f "$tmpf"
@@ -10,7 +10,7 @@ _ask_assistant() {
 _explain_assistant() {
     tmpf="$(mktemp)"
     printf '%s\n' "$READLINE_LINE" > "$tmpf"
-    "./target/debug/shai-assistant" "explain" "--model" "open-aigpt35turbo" "--edit-file" "$tmpf"
+    "shai" "explain" "--model" "open-aigpt35turbo" "--edit-file" "$tmpf"
     READLINE_LINE="$(<"$tmpf")"
     READLINE_POINT="${#READLINE_LINE}"
     rm -f "$tmpf"
