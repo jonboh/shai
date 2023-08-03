@@ -389,7 +389,7 @@ impl<'t> ShaiUI<'t> {
                         }
                     }
                 }
-
+                Input {key: Key::Tab, ..} => (),
                 input => {
                     self.textarea.input(input);
                 }
