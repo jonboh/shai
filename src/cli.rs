@@ -4,6 +4,8 @@ use std::io::{self, StdoutLock};
 use std::time::Duration;
 
 use clap::Parser;
+use regex::Regex;
+use lazy_static::lazy_static;
 
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
@@ -152,6 +154,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 enum WriteBuffer {
     Yes,
+    Raw,
     No,
 }
 
@@ -241,17 +244,18 @@ pub struct ShaiUI<'t> {
     auxiliary_response: ModelWindow<'t>,
 }
 
-/// Checks whether the response contains ``` and other indicators that
-/// the model ignored the instruction to just return the commands
-#[allow(unused)]
-fn is_just_command(response: &str) -> bool {
-    true // TODO: implement
-}
+fn extract_code_blocks(text: &str) -> Vec<String> {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"(?s)```(?:\w+)?\n(.*?)\n```").unwrap();
+    }
 
-/// Tries to remove all text that is not just a command
-#[allow(unused)]
-fn extract_commands(response: &str) -> String {
-    response.to_string()
+    let mut code_blocks = Vec::new();
+    for capture in RE.captures_iter(text) {
+        if let Some(code_block) = capture.get(1) {
+            code_blocks.push(code_block.as_str().to_string());
+        }
+    }
+    code_blocks
 }
 
 enum Layout {
@@ -333,7 +337,7 @@ impl<'t> ShaiUI<'t> {
             .and_then(|file| fs::read_to_string(file).ok())
             .unwrap_or_default();
         self.textarea.insert_str(&cli_text);
-        let response = self.mainloop().await;
+        let write_mode = self.mainloop().await;
 
         // restore terminal mode
         disable_raw_mode()?;
@@ -346,8 +350,18 @@ impl<'t> ShaiUI<'t> {
 
         if let ShaiArgs::Ask(_) = self.args {
             if let Some(file) = &self.args.edit_file() {
-                if let WriteBuffer::Yes = response? {
-                    fs::write(file, &self.main_response.response)?
+                match write_mode? {
+                    WriteBuffer::Yes => {
+                        let code_blocks = extract_code_blocks(&self.main_response.response);
+                        if code_blocks.is_empty() { // the model probably obeyed the instructions
+                            fs::write(file, &self.main_response.response)?;
+                        }
+                        else {
+                            fs::write(file, code_blocks.join("\n"))?;
+                        }
+                    },
+                    WriteBuffer::Raw => fs::write(file, &self.main_response.response)?,
+                    WriteBuffer::No => (),
                 }
             }
         }
@@ -364,6 +378,11 @@ impl<'t> ShaiUI<'t> {
 
             match crossterm::event::read()?.into() {
                 Input { key: Key::Esc, .. } => return Ok(WriteBuffer::No),
+                Input {
+                    key: Key::Char('a'),
+                    ctrl: true,
+                    alt: true,
+                } => return Ok(WriteBuffer::Raw),
                 Input {
                     key: Key::Char('a'),
                     ctrl: true,
@@ -531,5 +550,47 @@ impl<'t> ShaiUI<'t> {
             RequestType::Normal => self.main_response.update(new, ShaiProgress::Waiting),
             RequestType::Auxiliary => self.auxiliary_response.update(new, ShaiProgress::Waiting),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_code_blocks;
+
+    #[test]
+    fn code_blocks_regex () {
+        let code_rust = "fn main() {
+    println!(\"Hello, World!\");
+}";
+        let code_no_tag = "
+Hello my friend";
+
+        let code_python = "
+print('Hello, World!')
+
+
+
+        ";
+        let text = format!("
+Some text before the code block
+```rust
+{code_rust}
+```
+
+
+
+```
+{code_no_tag}
+```
+Some text after the code block
+```python
+{code_python}
+```
+    ");
+    let blocks = extract_code_blocks(&text);
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[0], code_rust);
+    assert_eq!(blocks[1], code_no_tag);
+    assert_eq!(blocks[2], code_python);
     }
 }

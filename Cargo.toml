@@ -23,3 +23,6 @@ tui-textarea = "0.2"
 crossterm = {version = "0.25", features = ["event-stream"]}
 tokio = {version = "1.29", features = ["rt", "rt-multi-thread", "macros"]}
 thiserror = {version = "1.0"}
+
+regex = {version = "1.9"}
+lazy_static = {version = "1.4"}
