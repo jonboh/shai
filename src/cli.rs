@@ -157,9 +157,13 @@ enum WriteBuffer {
 
 enum RequestState {
     WaitRequest,
+    Streaming,
+}
+
+enum RequestExit {
     Cancel,
     Exit,
-    Streaming,
+    Finished,
 }
 
 #[derive(Copy, Clone)]
@@ -368,7 +372,7 @@ impl<'t> ShaiUI<'t> {
                 Input {
                     key: Key::Enter, ..
                 } => {
-                    if let RequestState::Exit = self.send_request(RequestType::Normal).await? {
+                    if let RequestExit::Exit = self.send_request(RequestType::Normal).await? {
                         return Ok(WriteBuffer::No);
                     }
                 }
@@ -394,7 +398,6 @@ impl<'t> ShaiUI<'t> {
     }
 
     fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // TODO: draw auxiliary if active
         self.term.draw(|f| match &self.layout {
             Layout::InputResponse => {
                 let layout = self.layout.create();
@@ -419,7 +422,7 @@ impl<'t> ShaiUI<'t> {
     async fn send_request(
         &mut self,
         request_type: RequestType,
-    ) -> Result<RequestState, Box<dyn std::error::Error>> {
+    ) -> Result<RequestExit, Box<dyn std::error::Error>> {
         let config = ConfigKind::from(self.args.clone());
         let model = config.model().clone();
         let task = match config {
@@ -448,12 +451,12 @@ impl<'t> ShaiUI<'t> {
                 RequestState::WaitRequest => {
                     if crossterm::event::poll(Duration::from_millis(100))? {
                         match crossterm::event::read()?.into() {
-                            Input { key: Key::Esc, .. } => state = RequestState::Exit,
+                            Input { key: Key::Esc, .. } => return Ok(RequestExit::Exit),
                             Input {
                                 key: Key::Char('c'),
                                 ctrl: true,
                                 ..
-                            } => state = RequestState::Cancel,
+                            } => return Ok(RequestExit::Cancel),
                             _ => (),
                         }
                     }
@@ -465,13 +468,14 @@ impl<'t> ShaiUI<'t> {
                 RequestState::Streaming => {
                     return self
                         .stream_response(
-                            request_task.await?.map_err(|_| ModelError::Error)?,
+                            request_task
+                                .await?
+                                .map_err(|err| ModelError::Error(Box::new(err)))?
+                                .map(|each| each.map_err(|err| ModelError::Error(Box::new(err)))),
                             request_type,
                         )
                         .await
-                } // FIX: error handling
-                RequestState::Cancel => return Ok(RequestState::Cancel),
-                RequestState::Exit => return Ok(RequestState::Exit),
+                }
             }
             match request_type {
                 RequestType::Normal => self.main_response.spin_fidget(),
@@ -482,12 +486,12 @@ impl<'t> ShaiUI<'t> {
 
     async fn stream_response(
         &mut self,
-        mut response_stream: impl Stream<Item = String> + Unpin,
+        mut response_stream: impl Stream<Item = Result<String, ModelError>> + Unpin,
         request_type: RequestType,
-    ) -> Result<RequestState, Box<dyn std::error::Error>> {
+    ) -> Result<RequestExit, Box<dyn std::error::Error>> {
         while let Some(message) = response_stream.next().await {
             // TODO: dont block on await
-            self.append_message_response(&message, request_type);
+            self.append_message_response(&message?, request_type);
             self.draw()?;
             if crossterm::event::poll(Duration::from_millis(100))? {
                 match crossterm::event::read()?.into() {
@@ -495,13 +499,13 @@ impl<'t> ShaiUI<'t> {
                         key: Key::Char('c'),
                         ctrl: true,
                         ..
-                    } => return Ok(RequestState::Exit),
-                    Input { key: Key::Esc, .. } => return Ok(RequestState::Cancel),
+                    } => return Ok(RequestExit::Cancel),
+                    Input { key: Key::Esc, .. } => return Ok(RequestExit::Exit),
                     _ => (),
                 }
             }
         }
-        Ok(RequestState::Streaming)
+        Ok(RequestExit::Finished)
     }
 
     fn clear_response(&mut self, request_type: RequestType) {

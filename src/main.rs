@@ -1,6 +1,8 @@
-use shai_assistant::cli;
+use shai::cli;
 
 #[tokio::main]
 async fn main() {
-    cli::run().await.unwrap()
+    if let Err(err) = cli::run().await {
+        eprintln!("\n{err}")
+    }
 }

@@ -3,6 +3,8 @@ use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 
+use thiserror::Error;
+
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, ClientBuilder};
 
@@ -64,39 +66,51 @@ impl OpenAIGPTModel {
     }
 }
 
-// struct OpenAIGPTCoversation {
-//     system_msg: String,
-//     user_msg: String
-// }
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Error)]
 pub enum OpenAIError {
-    Error, // TODO:
+    #[error("{0}")]
+    Authentication(String),
+    #[error("Client failed to initialize: {0}")]
+    Client(#[from]  reqwest::Error),
+    #[error("Stream was interrupted: {0}")]
+    Stream(String),
+    #[error("Failed to deserialize OpenAI model response: {0}")]
+    Deserialization(String),
+    #[error("An unknown error happened: {0}")]
+    Unknown(String),
+
+    // TODO: handle errors like billing limit reached
 }
 
 impl OpenAIGPTModel {
-    // TODO: switch ask/explain logic further up
-    pub async fn send(
+    async fn send_request(
         &self,
         request: String,
         context: Context,
         task: Task,
-    ) -> Result<String, OpenAIError> {
+        streaming: bool,
+    ) -> Result<reqwest::Response, OpenAIError> {
         let client: Client = ClientBuilder::new()
             .timeout(Duration::from_secs(60))
             .build()
-            .map_err(|_| OpenAIError::Error)?;
+            .map_err(OpenAIError::Client)?;
 
         let url = "https://api.openai.com/v1/chat/completions";
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .expect("You need to set OPENAI_API_KEY to use this model");
+        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+            OpenAIError::Authentication(
+                "You need to set OPENAI_API_KEY env variable to use this model".to_string(),
+            )
+        })?;
 
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|_| OpenAIError::Error)?,
+            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|err| {
+                OpenAIError::Authentication(
+                    format!("Failed to create authentication header: {err}"),
+                )
+            })?,
         );
 
         let context_request = build_context_request(request, context);
@@ -111,18 +125,28 @@ impl OpenAIGPTModel {
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": context_request}
             ],
-            "temperature": 0
+            "temperature": 0,
+            "stream": streaming,
         });
 
-        let response = client
+        client
             .post(url)
             .headers(headers)
             .json(&body)
             .send()
             .await
-            .map_err(|_| OpenAIError::Error)?;
+            .map_err(|err| OpenAIError::Unknown(format!("Unknown request error: {}", err.without_url())))
+    }
 
-        let response: Response = response.json().await.map_err(|_| OpenAIError::Error)?;
+    pub async fn send(
+        &self,
+        request: String,
+        context: Context,
+        task: Task,
+    ) -> Result<String, OpenAIError> {
+        let response = self.send_request(request, context, task, false).await?;
+
+        let response: Response = response.json().await.map_err(|err| OpenAIError::Unknown(err.to_string()))?;
         let response_text = response.choices[0].message.content.clone();
         Ok(response_text)
     }
@@ -178,62 +202,25 @@ impl OpenAIGPTModel {
         request: String,
         context: Context,
         task: Task,
-    ) -> Result<impl Stream<Item = String>, OpenAIError> {
-        let client: Client = ClientBuilder::new()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|_| OpenAIError::Error)?;
-
-        let url = "https://api.openai.com/v1/chat/completions";
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .expect("You need to set OPENAI_API_KEY to use this model");
-
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|_| OpenAIError::Error)?,
-        );
-
-        let context_request = build_context_request(request, context);
-
-        let system_content = match task {
-            Task::GenerateCommand => prompts::ASK_MODEL_TASK,
-            Task::Explain => prompts::EXPLAIN_MODEL_TASK,
-        };
-        let body = json!({
-            "model": self.api_name(),
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": context_request}
-            ],
-            "temperature": 0,
-            "stream": true,
-        });
-
-        let raw_response_stream = client
-            .post(url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|_| OpenAIError::Error)?
+    ) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
+        let response = self
+            .send_request(request, context, task, true)
+            .await?
             .bytes_stream()
             .eventsource();
-        let message_stream = raw_response_stream.map(|response| {
-            let data = response.expect("interrupted stream").data; // FIX: expect used for non-bug failure condition
+        let message_stream = response.map(|response| {
+            let data = response.map_err(|err| OpenAIError::Stream(err.to_string()))?.data;
             if data == "[DONE]" {
-                "".to_string()
+                Ok("".to_string())
             } else {
-                match &serde_json::from_str::<ResponseChunk>(&data)
-                    .unwrap()
+                Ok(match &serde_json::from_str::<ResponseChunk>(&data)
+                    .map_err(|err| OpenAIError::Deserialization(err.to_string()))?
                     .choices[0]
                     .delta
                 {
                     MessageChunk::Content { content: msg } => msg.to_string(),
                     _ => "".to_string(),
-                }
+                })
             }
         });
         Ok(message_stream)
@@ -258,7 +245,7 @@ mod tests {
 
     #[test]
     fn stop_message() {
-        let raw_response = r#"{"id":"chatcmpl-7hjUwKyug0y6n4luq7XJf5FVKLuHQ","object":"chat.completion.chunk","created":1690657354,"model":"gpt-3.5-turbo-0613","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#;
+        let raw_response = r#"{"id":"chatcmpl","object":"chat.completion.chunk","created":9999,"model":"gpt-3.5-turbo-0613","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#;
         serde_json::from_str::<ResponseChunk>(raw_response).unwrap();
     }
 }

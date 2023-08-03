@@ -72,10 +72,10 @@ enum ModelKind {
     // Local // ?
 }
 
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Error)]
 enum ModelError {
-    #[error("ModelError")]
-    Error, // TODO:
+    #[error("ModelError: {0}")]
+    Error(#[from] Box<dyn std::error::Error>),
 }
 
 #[allow(unused)]
@@ -90,7 +90,7 @@ async fn model_request(
         OpenAIGPT(model) => model
             .send(request, context, task)
             .await
-            .map_err(|_| ModelError::Error),
+            .map_err(|err| ModelError::Error(Box::new(err))),
     }
 }
 
@@ -99,7 +99,7 @@ async fn model_stream_request(
     request: String,
     context: Context,
     task: Task,
-) -> Result<impl Stream<Item = String>, OpenAIError> {
+) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
     use ModelKind::*;
     match model {
         OpenAIGPT(model) => model.send_streaming(request, context, task).await,
@@ -125,9 +125,7 @@ mod tests {
             Context::from(ConfigKind::Ask(AskConfig::default())),
             Task::GenerateCommand
             ).await.unwrap();
-        while let Some(message) = response_stream.next().await {
-            dbg!(message);
+        while response_stream.next().await.is_some() {
         }
-        assert_eq!(true, false)
     }
 }
