@@ -505,11 +505,12 @@ impl<'t> ShaiUI<'t> {
     }
 
     fn clear_response(&mut self, request_type: RequestType) {
-        // TODO: on normal clear and make auxiliary invisible
         match request_type {
-            RequestType::Normal => self
-                .main_response
-                .update(String::new(), ShaiProgress::Waiting),
+            RequestType::Normal => {
+                self.layout = Layout::InputResponse;
+                self.main_response
+                    .update(String::new(), ShaiProgress::Waiting)
+            }
             RequestType::Auxiliary => self
                 .auxiliary_response
                 .update(String::new(), ShaiProgress::Waiting),
