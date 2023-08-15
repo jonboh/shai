@@ -4,8 +4,8 @@ use std::io::{self, StdoutLock};
 use std::time::Duration;
 
 use clap::Parser;
-use regex::Regex;
 use lazy_static::lazy_static;
+use regex::Regex;
 
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
@@ -26,6 +26,13 @@ use crate::{model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelErr
 
 #[derive(Parser, Clone)]
 #[command(name = "shai")]
+pub enum ShaiCLIArgs {
+    Ask(AskArgs),
+    Explain(ExplainArgs),
+    GenerateScript(IntegrationScriptArgs),
+}
+
+#[derive(Clone)]
 pub enum ShaiArgs {
     Ask(AskArgs),
     Explain(ExplainArgs),
@@ -56,17 +63,22 @@ impl From<ShaiArgs> for ConfigKind {
 }
 
 #[derive(clap::ValueEnum, Clone)]
+#[allow(non_camel_case_types)]
 enum ArgModelKind {
-    OpenAIGPT35turbo,
-    OpenAIGPT35turbo16k,
+    OpenAIGPT35Turbo,
+    OpenAIGPT35Turbo_16k,
+    OpenAIGPT4,
+    OpenAIGPT4_32k,
 }
 
 impl From<ArgModelKind> for ModelKind {
     fn from(value: ArgModelKind) -> Self {
         use ArgModelKind::*;
         match value {
-            OpenAIGPT35turbo => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
-            OpenAIGPT35turbo16k => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo16k),
+            OpenAIGPT35Turbo => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
+            OpenAIGPT35Turbo_16k => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo_16k),
+            OpenAIGPT4 => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT4),
+            OpenAIGPT4_32k => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT4_32k),
         }
     }
 }
@@ -96,6 +108,7 @@ pub struct AskArgs {
     edit_file: Option<std::path::PathBuf>,
 }
 
+
 #[derive(clap::Args, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct ExplainArgs {
@@ -116,6 +129,23 @@ pub struct ExplainArgs {
 
     #[arg(long)]
     edit_file: Option<std::path::PathBuf>,
+}
+
+
+#[derive(clap::ValueEnum, Clone)]
+enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+    Nushell,
+    PowerShell,
+}
+
+#[derive(clap::Args, Clone)]
+#[command(author, version, about, long_about = None)]
+pub struct IntegrationScriptArgs {
+    #[arg(long, value_enum)]
+    shell: Shell,
 }
 
 impl From<AskArgs> for AskConfig {
@@ -146,9 +176,26 @@ impl From<ExplainArgs> for ExplainConfig {
 }
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args = ShaiArgs::parse();
-    let mut ui = ShaiUI::new(args)?;
-    ui.run().await?;
+    let args = ShaiCLIArgs::parse();
+    match args {
+        ShaiCLIArgs::Ask(shai_args) => {
+            let mut ui = ShaiUI::new(ShaiArgs::Ask(shai_args))?;
+            ui.run().await?;
+        }
+        ShaiCLIArgs::Explain(shai_args) => {
+            let mut ui = ShaiUI::new(ShaiArgs::Explain(shai_args))?;
+            ui.run().await?;
+        }
+        ShaiCLIArgs::GenerateScript(integration_args) => {
+            match integration_args.shell {
+                Shell::Bash => println!("{}",include_str!("../bash_assistant.sh")),
+                Shell::Zsh => println!("{}", include_str!("../zsh_assistant.zsh")),
+                Shell::Fish => println!("{}", include_str!("../fish_assistant.fish")),
+                Shell::Nushell => println!("{}",include_str!("../nushell_assistant.nu")),
+                Shell::PowerShell => println!("{}",include_str!("../powershell_assistant.ps1")),
+            }
+        },
+    }
     Ok(())
 }
 
@@ -281,6 +328,7 @@ impl Layout {
     }
 }
 
+
 impl<'t> ShaiUI<'t> {
     /// This function initializes Shai and eases disabling terminal raw mode in all circumstances
     fn initialization(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
@@ -353,13 +401,13 @@ impl<'t> ShaiUI<'t> {
                 match write_mode? {
                     WriteBuffer::Yes => {
                         let code_blocks = extract_code_blocks(&self.main_response.response);
-                        if code_blocks.is_empty() { // the model probably obeyed the instructions
+                        if code_blocks.is_empty() {
+                            // the model probably obeyed the instructions
                             fs::write(file, &self.main_response.response)?;
-                        }
-                        else {
+                        } else {
                             fs::write(file, code_blocks.join("\n"))?;
                         }
-                    },
+                    }
                     WriteBuffer::Raw => fs::write(file, &self.main_response.response)?,
                     WriteBuffer::No => (),
                 }
@@ -408,7 +456,7 @@ impl<'t> ShaiUI<'t> {
                         }
                     }
                 }
-                Input {key: Key::Tab, ..} => (),
+                Input { key: Key::Tab, .. } => (),
                 input => {
                     self.textarea.input(input);
                 }
@@ -558,7 +606,7 @@ mod tests {
     use super::extract_code_blocks;
 
     #[test]
-    fn code_blocks_regex () {
+    fn code_blocks_regex() {
         let code_rust = "fn main() {
     println!(\"Hello, World!\");
 }";
@@ -571,7 +619,8 @@ print('Hello, World!')
 
 
         ";
-        let text = format!("
+        let text = format!(
+            "
 Some text before the code block
 ```rust
 {code_rust}
@@ -586,11 +635,12 @@ Some text after the code block
 ```python
 {code_python}
 ```
-    ");
-    let blocks = extract_code_blocks(&text);
-    assert_eq!(blocks.len(), 3);
-    assert_eq!(blocks[0], code_rust);
-    assert_eq!(blocks[1], code_no_tag);
-    assert_eq!(blocks[2], code_python);
+    "
+        );
+        let blocks = extract_code_blocks(&text);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0], code_rust);
+        assert_eq!(blocks[1], code_no_tag);
+        assert_eq!(blocks[2], code_python);
     }
 }

@@ -52,16 +52,21 @@ enum GPTRole {
 }
 
 #[derive(Deserialize, Clone)]
+#[allow(non_camel_case_types)]
 pub(crate) enum OpenAIGPTModel {
     GPT35Turbo,
-    GPT35Turbo16k,
+    GPT35Turbo_16k,
+    GPT4,
+    GPT4_32k
 }
 
 impl OpenAIGPTModel {
     fn api_name(&self) -> String {
         match self {
             OpenAIGPTModel::GPT35Turbo => "gpt-3.5-turbo".to_string(),
-            OpenAIGPTModel::GPT35Turbo16k => "gpt-3.5-turbo-16k".to_string(),
+            OpenAIGPTModel::GPT35Turbo_16k => "gpt-3.5-turbo-16k".to_string(),
+            OpenAIGPTModel::GPT4 => "gpt-4".to_string(),
+            OpenAIGPTModel::GPT4_32k => "gpt-4-32k".to_string(),
         }
     }
 }
