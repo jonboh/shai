@@ -1,3 +1,5 @@
+set model "open-aigpt35-turbo"
+
 function ask_assistant --description 'Edit command in Shai'
     set -l f (mktemp)
     if set -q f[1]
@@ -11,7 +13,7 @@ function ask_assistant --description 'Edit command in Shai'
 
     set -l p (commandline -C)
     commandline -b > $f
-    shai ask --model open-aigpt35turbo --edit-file $f
+    shai ask --model $model --edit-file $f
 
     commandline -r (cat $f)
     commandline -C $p
@@ -31,12 +33,12 @@ function explain_assistant --description 'Let Shai explain this command'
 
     set -l p (commandline -C)
     commandline -b > $f
-    shai explain --model open-aigpt35turbo --edit-file $f
+    shai explain --model $model --edit-file $f
 
     commandline -r (cat $f)
     commandline -C $p
     command rm $f
 end
 
-bind \cx ask_assistant
-bind \ck explain_assistant
+bind \es ask_assistant
+bind \ee explain_assistant
