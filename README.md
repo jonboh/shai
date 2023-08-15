@@ -46,9 +46,28 @@ to explain commands taken from tutorials or forums.
 ![SSH Tunnel]()
 ![Make a GIF from a video file]()
 
-## Shell Integration
+## Installation
+##### Cargo
+```shell
+cargo install shai
+```
+
+Note: See the [next section](#shell-integration) to integrate shai and allow it 
+to interact with your buffer line
+
+<!-- ##### Arch Linux. AUR: -->
+<!-- ```shell -->
+<!-- # TODO: -->
+<!-- ``` -->
+
+##### Other
+Use the [latest release] in this github repo.
+Put the binary in a location that is included in your `PATH`, source the corresponding integration
+shell script (see [next section](#shell-integration)) in your rc file and you should be good to go.
+
+### Shell Integration
 I've developed Shai with the aim to have it very closely integrated in the shell. I tend to use it similarly to
-[fzf](https://github.com/junegunn/fzf), so one key-combo away.
+[fzf](https://github.com/junegunn/fzf), so one key-shortcut away.
 
 In this repository you will find the scripts needed to integrate Shai in your shell experience.
 The following list contains the shells that are currently supported and the planned ones.
@@ -73,8 +92,17 @@ command edition capabilities of the shell treating Shai as a text editor.
 | Bash            | `bash_assistant.sh`        |
 | Zsh             | `zsh_assistant.zsh`        |
 | Fish            | `fish_assistant.fish`      |
+| Nushell         | `nushell_assistant.nu`     |
 | PowerShell      | `powershell_assistant.ps1` |
 
+If you just install the binary you can generate the integration script using shai
+```shell
+shai --generate-script <your-shell, one of {bash, zsh, fish, nushell, powershell}>
+# e.g
+shai --generate-script zsh > zsh_assistant.zsh
+# then in your .zshrc
+source zsh_assistant.zsh
+```
 
 ## How to use it
 You'll need to source the shell integration script of your shell (you can do that on your rc file).
@@ -92,13 +120,15 @@ export OPENAI_API_KEY=$(<command to get API key>)
 # if you have it on a text file
 export OPENAI_API_KEY=$(cat ~/.secrets/chatgpt.key)
 ```
+See [here](https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key) how to get your OpenAI API key.
 
 ### Shell Shortcuts
 If you don't modify the shell integration script the shortcuts will be the following:
 - `Alt+s` : Command Generation
 - `Alt+e` : Command Explanation
 
-You can change these shortcuts on the shell integration files.
+You can change these shortcuts on the shell integration files. They have been chosen to avoid collision with already existing
+shortcuts in *readline*.
 
 ### Shai Controls
 - `Enter` : Send Prompt
@@ -127,6 +157,24 @@ I plan to add support for other models like [OpenAssistant](https://github.com/L
 once they provide an API or a way to run it locally is available (even if the requirements for the machine
 are steep, but within a high-end desktop). If you have pointers for other similar models that can be run
 locally or have an available API please, fill an issue and I will try to add support for it.
+
+
+### Context Awareness. Experimental!
+Initially I envisioned Shai as a more capable assistant to which context about the current state
+of your machine could be forwarded, and it would act accordingly. There are some options that are
+disabled by default:
+
+| Option           | Description                                                                                                  |
+| ---------------- | ---------------                                                                                              |
+| pwd              | Provides the model with the current working directory                                                        |
+| depth            | depth with which to run the `tree` command. It provides context about ther current directory and its content |
+| environment      | The list of environment variables set (only their name is passed to the model)                               |
+| programs         | The list of available programs to the model with which to complete the task                                  |
+
+
+I have found that the performance of the GPT3.5 model is lacking in this respect. I have
+some hope that the GPT-4 (or future) models perform better, so the option to forward this context
+to the model is still available, if you find good results with it let me know!
 
 
 ## Roadmap
