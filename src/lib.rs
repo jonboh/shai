@@ -1,3 +1,5 @@
+#![allow(clippy::future_not_send)]
+
 pub mod cli;
 mod context;
 mod model;
@@ -17,10 +19,10 @@ enum ConfigKind {
 }
 
 impl ConfigKind {
-    fn model(&self) -> &ModelKind {
+    const fn model(&self) -> &ModelKind {
         match self {
-            ConfigKind::Ask(config) => &config.model,
-            ConfigKind::Explain(config) => &config.model,
+            Self::Ask(config) => &config.model,
+            Self::Explain(config) => &config.model,
         }
     }
 }
@@ -85,9 +87,8 @@ async fn model_request(
     context: Context,
     task: Task,
 ) -> Result<String, ModelError> {
-    use ModelKind::*;
     match model {
-        OpenAIGPT(model) => model
+        ModelKind::OpenAIGPT(model) => model
             .send(request, context, task)
             .await
             .map_err(|err| ModelError::Error(Box::new(err))),
@@ -100,13 +101,12 @@ async fn model_stream_request(
     context: Context,
     task: Task,
 ) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
-    use ModelKind::*;
     match model {
-        OpenAIGPT(model) => model.send_streaming(request, context, task).await,
+        ModelKind::OpenAIGPT(model) => model.send_streaming(request, context, task).await,
     }
 }
 
-fn build_context_request(request: String, context: Context) -> String {
+fn build_context_request(request: &str, context: Context) -> String {
     String::from(context) + &format!("Here is your <task>: \n <task>{request}</task>")
 }
 

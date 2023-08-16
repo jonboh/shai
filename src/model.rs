@@ -3,7 +3,7 @@
 //         -> Result<String, Box<dyn std::error::Error>>;
 // }
 
-pub(crate) enum Task {
+pub enum Task {
     GenerateCommand,
     Explain,
 }

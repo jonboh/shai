@@ -54,7 +54,7 @@ enum GPTRole {
 
 #[derive(Deserialize, Clone)]
 #[allow(non_camel_case_types)]
-pub(crate) enum OpenAIGPTModel {
+pub enum OpenAIGPTModel {
     GPT35Turbo,
     GPT35Turbo_16k,
     GPT4,
@@ -64,10 +64,10 @@ pub(crate) enum OpenAIGPTModel {
 impl OpenAIGPTModel {
     fn api_name(&self) -> String {
         match self {
-            OpenAIGPTModel::GPT35Turbo => "gpt-3.5-turbo".to_string(),
-            OpenAIGPTModel::GPT35Turbo_16k => "gpt-3.5-turbo-16k".to_string(),
-            OpenAIGPTModel::GPT4 => "gpt-4".to_string(),
-            OpenAIGPTModel::GPT4_32k => "gpt-4-32k".to_string(),
+            Self::GPT35Turbo => "gpt-3.5-turbo".to_string(),
+            Self::GPT35Turbo_16k => "gpt-3.5-turbo-16k".to_string(),
+            Self::GPT4 => "gpt-4".to_string(),
+            Self::GPT4_32k => "gpt-4-32k".to_string(),
         }
     }
 }
@@ -135,14 +135,14 @@ impl OpenAIGPTModel {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|err| {
+            HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|err| {
                 OpenAIError::Authentication(format!(
                     "Failed to create authentication header: {err}"
                 ))
             })?,
         );
 
-        let context_request = build_context_request(request, context);
+        let context_request = build_context_request(&request, context);
 
         let system_content = match task {
             Task::GenerateCommand => prompts::ASK_MODEL_TASK,
@@ -238,37 +238,34 @@ impl OpenAIGPTModel {
         task: Task,
     ) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
         let response = self.send_request(request, context, task, true).await?;
-        match response.status() {
-            StatusCode::OK => {
-                let response = response.bytes_stream().eventsource();
-                let message_stream = response.map(|response| {
-                    let data = response
-                        .map_err(|err| OpenAIError::Stream(err.to_string()))?
-                        .data;
-                    if data == "[DONE]" {
-                        Ok("".to_string())
-                    } else {
-                        Ok(
-                            match &serde_json::from_str::<ResponseChunk>(&data)
-                                .map_err(|err| OpenAIError::Deserialization(err.to_string()))?
-                                .choices[0]
-                                .delta
-                            {
-                                MessageChunk::Content { content: msg } => msg.to_string(),
-                                _ => "".to_string(),
-                            },
-                        )
-                    }
-                });
-                Ok(message_stream)
-            }
-            _ => {
-                let error: OpenAIErrorResponse = response
-                        .json()
-                        .await
-                        .map_err(|err| OpenAIError::Unknown(err.to_string()))?;
-                Err(OpenAIError::ErrorResponse(error))
-            }
+        if response.status() == StatusCode::OK {
+            let response = response.bytes_stream().eventsource();
+            let message_stream = response.map(|response| {
+                let data = response
+                    .map_err(|err| OpenAIError::Stream(err.to_string()))?
+                    .data;
+                if data == "[DONE]" {
+                    Ok(String::new())
+                } else {
+                    Ok(
+                        match &serde_json::from_str::<ResponseChunk>(&data)
+                            .map_err(|err| OpenAIError::Deserialization(err.to_string()))?
+                            .choices[0]
+                            .delta
+                        {
+                            MessageChunk::Content { content: msg } => msg.to_string(),
+                            _ => String::new(),
+                        },
+                    )
+                }
+            });
+            Ok(message_stream)
+        } else {
+            let error: OpenAIErrorResponse = response
+                .json()
+                .await
+                .map_err(|err| OpenAIError::Unknown(err.to_string()))?;
+            Err(OpenAIError::ErrorResponse(error))
         }
     }
 }

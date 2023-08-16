@@ -2,7 +2,7 @@ use crate::ConfigKind;
 use std::{io, process::Command};
 
 #[derive(Clone)]
-pub(crate) struct Context {
+pub struct Context {
     pwd: Option<String>,
     tree: Option<String>,
     environment: Option<String>,
@@ -12,7 +12,7 @@ pub(crate) struct Context {
 impl From<ConfigKind> for Context {
     fn from(value: ConfigKind) -> Self {
         match value {
-            ConfigKind::Ask(config) => Context {
+            ConfigKind::Ask(config) => Self {
                 pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
                 tree: config
                     .depth
@@ -20,7 +20,7 @@ impl From<ConfigKind> for Context {
                 environment: config.environment.as_ref().map(|env| env.join(",")),
                 programs: config.programs.as_ref().map(|programs| programs.join(",")),
             },
-            ConfigKind::Explain(config) => Context {
+            ConfigKind::Explain(config) => Self {
                 pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
                 tree: config
                     .depth
@@ -34,10 +34,10 @@ impl From<ConfigKind> for Context {
 
 impl From<Context> for String {
     fn from(value: Context) -> Self {
-        "".to_owned() + &value.pwd.map(|cwd| format!("You are currently in folder: {cwd}\n")).unwrap_or("".to_string())
-            + &value.tree.map(|tree|format!("The tree command run in the current folder gave this output: {tree}\n")).unwrap_or("".to_string())
-            + &value.environment.map(|env| format!("The following environment variables are defined: {env}\n")).unwrap_or("".to_string())
-            + &value.programs.map(|bins| format!("You have the following programs installed in the system, you should only use these programs to accomplish the <task>: {bins}\n")).unwrap_or("".to_string())
+        Self::new() + &value.pwd.map_or(Self::new(), |cwd| format!("You are currently in folder: {cwd}\n"))
+            + &value.tree.map_or(Self::new(), |tree|format!("The tree command run in the current folder gave this output: {tree}\n"))
+            + &value.environment.map_or(Self::new(), |env| format!("The following environment variables are defined: {env}\n"))
+            + &value.programs.map_or(Self::new(), |bins| format!("You have the following programs installed in the system, you should only use these programs to accomplish the <task>: {bins}\n"))
     }
 }
 

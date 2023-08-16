@@ -41,16 +41,16 @@ pub enum ShaiArgs {
 }
 
 impl ShaiArgs {
-    fn edit_file(&self) -> &Option<std::path::PathBuf> {
+    const fn edit_file(&self) -> &Option<std::path::PathBuf> {
         match self {
-            ShaiArgs::Ask(args) => &args.edit_file,
-            ShaiArgs::Explain(args) => &args.edit_file,
+            Self::Ask(args) => &args.edit_file,
+            Self::Explain(args) => &args.edit_file,
         }
     }
-    fn write_stdout(&self) -> bool {
+    const fn write_stdout(&self) -> bool {
         match self {
-            ShaiArgs::Ask(args) => args.write_stdout,
-            ShaiArgs::Explain(args) => args.write_stdout,
+            Self::Ask(args) => args.write_stdout,
+            Self::Explain(args) => args.write_stdout,
         }
     }
 }
@@ -58,8 +58,8 @@ impl ShaiArgs {
 impl From<ShaiArgs> for ConfigKind {
     fn from(value: ShaiArgs) -> Self {
         match value {
-            ShaiArgs::Ask(args) => ConfigKind::Ask(AskConfig::from(args)),
-            ShaiArgs::Explain(args) => ConfigKind::Explain(ExplainConfig::from(args)),
+            ShaiArgs::Ask(args) => Self::Ask(AskConfig::from(args)),
+            ShaiArgs::Explain(args) => Self::Explain(ExplainConfig::from(args)),
         }
     }
 }
@@ -75,12 +75,11 @@ enum ArgModelKind {
 
 impl From<ArgModelKind> for ModelKind {
     fn from(value: ArgModelKind) -> Self {
-        use ArgModelKind::*;
         match value {
-            OpenAIGPT35Turbo => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
-            OpenAIGPT35Turbo_16k => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo_16k),
-            OpenAIGPT4 => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT4),
-            OpenAIGPT4_32k => ModelKind::OpenAIGPT(OpenAIGPTModel::GPT4_32k),
+            ArgModelKind::OpenAIGPT35Turbo => Self::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
+            ArgModelKind::OpenAIGPT35Turbo_16k => Self::OpenAIGPT(OpenAIGPTModel::GPT35Turbo_16k),
+            ArgModelKind::OpenAIGPT4 => Self::OpenAIGPT(OpenAIGPTModel::GPT4),
+            ArgModelKind::OpenAIGPT4_32k => Self::OpenAIGPT(OpenAIGPTModel::GPT4_32k),
         }
     }
 }
@@ -152,7 +151,7 @@ impl From<AskArgs> for AskConfig {
     fn from(value: AskArgs) -> Self {
         let pwd = if value.pwd { Some(()) } else { None };
         let model = value.model.into();
-        AskConfig {
+        Self {
             pwd,
             depth: value.depth,
             environment: value.environment,
@@ -166,7 +165,7 @@ impl From<ExplainArgs> for ExplainConfig {
     fn from(value: ExplainArgs) -> Self {
         let pwd = if value.pwd { Some(()) } else { None };
         let model = value.model.into();
-        ExplainConfig {
+        Self {
             pwd,
             depth: value.depth,
             environment: value.environment,
@@ -175,6 +174,7 @@ impl From<ExplainArgs> for ExplainConfig {
     }
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = ShaiCLIArgs::parse();
     match args {
@@ -191,9 +191,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Shell::Zsh => println!("{}", include_str!("../scripts/zsh_assistant.zsh")),
             Shell::Fish => println!("{}", include_str!("../scripts/fish_assistant.fish")),
             Shell::Nushell => println!("{}", include_str!("../scripts/nushell_assistant.nu")),
-            Shell::PowerShell => {
-                println!("{}", include_str!("../scripts/powershell_assistant.ps1"))
-            }
+            Shell::PowerShell => println!("{}", include_str!("../scripts/powershell_assistant.ps1"))
         },
     }
     Ok(())
@@ -243,13 +241,12 @@ enum RequestType {
 }
 
 impl ShaiRequestProgress {
-    fn next_state(self) -> ShaiRequestProgress {
+    const fn next_state(self) -> Self {
         match self {
-            ShaiRequestProgress::Waiting => ShaiRequestProgress::S0,
-            ShaiRequestProgress::S0 => ShaiRequestProgress::S1,
-            ShaiRequestProgress::S1 => ShaiRequestProgress::S2,
-            ShaiRequestProgress::S2 => ShaiRequestProgress::S3,
-            ShaiRequestProgress::S3 => ShaiRequestProgress::S0,
+            Self::Waiting | Self::S3 => Self::S0,
+            Self::S0 => Self::S1,
+            Self::S1 => Self::S2,
+            Self::S2 => Self::S3,
         }
     }
 }
@@ -257,11 +254,11 @@ impl ShaiRequestProgress {
 impl Display for ShaiRequestProgress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ShaiRequestProgress::Waiting => write!(f, ""),
-            ShaiRequestProgress::S0 => write!(f, "-"),
-            ShaiRequestProgress::S1 => write!(f, "\\"),
-            ShaiRequestProgress::S2 => write!(f, "|"),
-            ShaiRequestProgress::S3 => write!(f, "/"),
+            Self::Waiting => write!(f, ""),
+            Self::S0 => write!(f, "-"),
+            Self::S1 => write!(f, "\\"),
+            Self::S2 => write!(f, "|"),
+            Self::S3 => write!(f, "/"),
         }
     }
 }
@@ -280,7 +277,7 @@ impl ModelWindow<'_> {
 
     fn spin_fidget(&mut self) {
         self.fidget = self.fidget.next_state();
-        self.update(self.response.clone(), self.fidget)
+        self.update(self.response.clone(), self.fidget);
     }
 }
 
@@ -289,7 +286,7 @@ fn create_explanation_paragraph<'t>(text: String, thinking: ShaiRequestProgress)
     Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL).title(title))
         .alignment(Alignment::Left)
-    .wrap(Wrap { trim: true })
+        .wrap(Wrap { trim: true })
 }
 
 fn create_input_paragraph<'t>(text: String, title: String) -> Paragraph<'t> {
@@ -300,9 +297,8 @@ fn create_input_paragraph<'t>(text: String, title: String) -> Paragraph<'t> {
 
 fn create_controls_paragraph<'t>(state: ShaiControls) -> Paragraph<'t> {
     let text = match state {
-        ShaiControls::Started =>  "<C-c>: Exit | Enter: Send Prompt".to_string(),
+        ShaiControls::Started | ShaiControls::ExplanationGenerated =>  "<C-c>: Exit | Enter: Send Prompt".to_string(),
         ShaiControls::Processing => "<C-c>: Exit | Esc: Cancel ".to_string(),
-        ShaiControls::ExplanationGenerated =>  "<C-c>: Exit | Enter: Send Prompt".to_string(),
         ShaiControls::CommandGenerated => "<C-c>: Exit | Enter: Send Prompt | <C-a>: Accept | <C-A>: Accept (raw) | <C-e>: Explain".to_string(),
     };
     Paragraph::new(text)
@@ -324,7 +320,8 @@ pub struct ShaiUI<'t> {
 
 fn extract_code_blocks(text: &str) -> Vec<String> {
     lazy_static! {
-        static ref RE: Regex = Regex::new(r"(?s)```(?:\w+)?\n(.*?)\n```").unwrap();
+        static ref RE: Regex = Regex::new(r"(?s)```(?:\w+)?\n(.*?)\n```")
+            .expect("The regex expression should be valid");
     }
 
     let mut code_blocks = Vec::new();
@@ -344,7 +341,7 @@ enum Layout {
 impl Layout {
     fn create(&self) -> ratatui::layout::Layout {
         match self {
-            Layout::InputResponse => ratatui::layout::Layout::default()
+            Self::InputResponse => ratatui::layout::Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
                     [
@@ -354,7 +351,7 @@ impl Layout {
                     ]
                     .as_ref(),
                 ),
-            Layout::InputResponseExplanation => ratatui::layout::Layout::default()
+            Self::InputResponseExplanation => ratatui::layout::Layout::default()
                 .direction(Direction::Vertical)
                 // .constraints([Constraint::Length(2), Constraint::Min(20), Constraint::Min(20)].as_ref())
                 .constraints([
@@ -375,7 +372,7 @@ impl<'t> ShaiUI<'t> {
         let backend = CrosstermBackend::new(stdout);
         let term = Terminal::new(backend)?;
 
-        let textarea = create_input_paragraph("".to_string(), Self::title(&args));
+        let textarea = create_input_paragraph(String::new(), Self::title(&args));
         let input = Input::default();
         let main_response = ModelWindow {
             response: String::new(),
@@ -402,7 +399,7 @@ impl<'t> ShaiUI<'t> {
         })
     }
 
-    pub fn new(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
         enable_raw_mode().expect("Terminal needs to be set in raw mode for Shai UI to work");
         match Self::initialization(args) {
             Ok(shai) => Ok(shai),
@@ -413,7 +410,7 @@ impl<'t> ShaiUI<'t> {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let cli_text = self
             .args
             .edit_file()
@@ -504,7 +501,7 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Enter,
                         ..
                     } => {
-                        if let RequestExit::Exit = self.send_request(RequestType::Normal).await? {
+                        if matches!(self.send_request(RequestType::Normal).await?, RequestExit::Exit) {
                             return Ok(WriteBuffer::No);
                         }
                     }
@@ -514,7 +511,7 @@ impl<'t> ShaiUI<'t> {
                         ..
                     } if matches!(controls, ShaiControls::CommandGenerated) => {
                         self.layout = Layout::InputResponseExplanation;
-                        if let RequestExit::Exit = self.send_request(RequestType::Auxiliary).await?
+                        if matches!(self.send_request(RequestType::Auxiliary).await?, RequestExit::Exit)
                         {
                             return Ok(WriteBuffer::No);
                         }
@@ -539,23 +536,25 @@ impl<'t> ShaiUI<'t> {
         self.term.draw(|f| {
             let layout = self.layout.create();
             let chunks = layout.split(f.size());
-            let width = chunks[0].width.max(3) - 3; // keep 2 for borders and 1 for cursor 
+            let width = chunks[0].width.max(3) - 3; // keep 2 for borders and 1 for cursor
             let scroll = self.input.visual_scroll(width as usize);
-            f.render_widget(self.input_text.clone().scroll((0, scroll as u16)), chunks[0]);
+            f.render_widget(
+                self.input_text.clone().scroll((0, u16::try_from(scroll).unwrap_or_default())),
+                chunks[0],
+            );
             f.set_cursor(
-                chunks[0].x 
-                + (self.input.visual_cursor().max(scroll) - scroll) as u16 
-                + 1,
-                chunks[0].y + 1);
+                chunks[0].x + u16::try_from(self.input.visual_cursor().max(scroll) - scroll).unwrap_or_default() + 1,
+                chunks[0].y + 1,
+            );
             match &self.layout {
                 Layout::InputResponse => {
                     f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
-                    f.render_widget(self.controls.clone(), chunks[2])
+                    f.render_widget(self.controls.clone(), chunks[2]);
                 }
                 Layout::InputResponseExplanation => {
                     f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
                     f.render_widget(self.auxiliary_response.paragraph.clone(), chunks[2]);
-                    f.render_widget(self.controls.clone(), chunks[3])
+                    f.render_widget(self.controls.clone(), chunks[3]);
                 }
             }
         })?;
@@ -669,7 +668,7 @@ impl<'t> ShaiUI<'t> {
             RequestType::Normal => {
                 self.layout = Layout::InputResponse;
                 self.main_response
-                    .update(String::new(), ShaiRequestProgress::Waiting)
+                    .update(String::new(), ShaiRequestProgress::Waiting);
             }
             RequestType::Auxiliary => self
                 .auxiliary_response
@@ -678,7 +677,7 @@ impl<'t> ShaiUI<'t> {
     }
 
     fn update_controls(&mut self, controls: ShaiControls) {
-        self.controls = create_controls_paragraph(controls)
+        self.controls = create_controls_paragraph(controls);
     }
 
     fn append_message_response(&mut self, response: &str, request_type: RequestType) {
@@ -686,7 +685,7 @@ impl<'t> ShaiUI<'t> {
             RequestType::Normal => &self.main_response.response,
             RequestType::Auxiliary => &self.auxiliary_response.response,
         };
-        let new = format!("{}{}", old_text, response);
+        let new = format!("{old_text}{response}");
         match request_type {
             RequestType::Normal => self.main_response.update(new, ShaiRequestProgress::Waiting),
             RequestType::Auxiliary => self
