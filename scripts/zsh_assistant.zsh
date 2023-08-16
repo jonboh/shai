@@ -1,10 +1,11 @@
+os="Linux" # use your distro to get more specific instructions
 model="open-aigpt35-turbo"
 
 ask-assistant() {
-    VISUAL="shai ask --model $model --edit-file" zle edit-command-line
+    VISUAL="shai ask --operating-system \"$os\" --model $model --edit-file" zle edit-command-line
 }
 explain-assistant() {
-    VISUAL="shai explain --model $model --edit-file" zle edit-command-line
+    VISUAL="shai explain --operating-system \"$os\" --model $model --edit-file" zle edit-command-line
 }
 # Bind a key combination to trigger the custom widget
 zle -N ask-assistant

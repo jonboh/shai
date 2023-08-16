@@ -5,6 +5,7 @@ use std::{io, process::Command};
 pub struct Context {
     pwd: Option<String>,
     tree: Option<String>,
+    operating_system: String,
     environment: Option<String>,
     programs: Option<String>,
 }
@@ -17,6 +18,7 @@ impl From<ConfigKind> for Context {
                 tree: config
                     .depth
                     .and_then(|depth| get_directory_tree(depth).ok()),
+                operating_system: config.operating_system,
                 environment: config.environment.as_ref().map(|env| env.join(",")),
                 programs: config.programs.as_ref().map(|programs| programs.join(",")),
             },
@@ -25,6 +27,7 @@ impl From<ConfigKind> for Context {
                 tree: config
                     .depth
                     .and_then(|depth| get_directory_tree(depth).ok()),
+                operating_system: config.operating_system,
                 environment: config.environment.as_ref().map(|env| env.join(",")),
                 programs: None,
             },
@@ -34,7 +37,9 @@ impl From<ConfigKind> for Context {
 
 impl From<Context> for String {
     fn from(value: Context) -> Self {
-        Self::new() + &value.pwd.map_or(Self::new(), |cwd| format!("You are currently in folder: {cwd}\n"))
+        Self::new() 
+            + &format!("The system you are running is a {} machine.\n", value.operating_system)
+            + &value.pwd.map_or(Self::new(), |cwd| format!("You are currently in folder: {cwd}\n"))
             + &value.tree.map_or(Self::new(), |tree|format!("The tree command run in the current folder gave this output: {tree}\n"))
             + &value.environment.map_or(Self::new(), |env| format!("The following environment variables are defined: {env}\n"))
             + &value.programs.map_or(Self::new(), |bins| format!("You have the following programs installed in the system, you should only use these programs to accomplish the <task>: {bins}\n"))

@@ -29,28 +29,31 @@ impl ConfigKind {
 
 #[derive(Deserialize)]
 struct AskConfig {
-    cwd: Option<()>,
-    depth: Option<u32>,
+    operating_system: String,
     environment: Option<Vec<String>>,
     programs: Option<Vec<String>>,
+    cwd: Option<()>,
+    depth: Option<u32>,
     model: ModelKind,
 }
 
 #[derive(Deserialize)]
 struct ExplainConfig {
-    cwd: Option<()>,
-    depth: Option<u32>,
+    operating_system: String,
     environment: Option<Vec<String>>,
     model: ModelKind,
+    cwd: Option<()>,
+    depth: Option<u32>,
 }
 
 impl Default for AskConfig {
     fn default() -> Self {
         Self {
-            cwd: None,
-            depth: None,
+            operating_system: "Linux".to_string(),
             environment: None,
             programs: None,
+            cwd: None,
+            depth: None,
             model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
         }
     }
@@ -59,9 +62,10 @@ impl Default for AskConfig {
 impl Default for ExplainConfig {
     fn default() -> Self {
         Self {
+            operating_system: "Linux".to_string(),
+            environment: None,
             cwd: None,
             depth: None,
-            environment: None,
             model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
         }
     }

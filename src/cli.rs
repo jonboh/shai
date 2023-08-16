@@ -43,6 +43,19 @@ pub enum ShaiCLIArgs {
 #[derive(clap::Args, Clone)]
 #[command(author, about, long_about = None)]
 pub struct AskArgs {
+    /// Tell the model which OS should be assumed. Distro names are also valid.
+    #[arg(long, default_value="Linux")]
+    operating_system: String,
+
+    /// Add the name of a defined environment variable. Repeat to list several items
+    #[arg(long, short, default_value = None)]
+    environment: Option<Vec<String>>,
+
+    /// Add a program to the list of available programs. Repeat to list several items. 
+    /// If unset the model is free to use any program
+    #[arg(long, short, default_value = None)]
+    program: Option<Vec<String>>,
+
     /// Provide the model with the current working directory.
     /// If unset the model does not get any information about what the current directory is.
     #[arg(long)]
@@ -53,15 +66,6 @@ pub struct AskArgs {
     /// directory
     #[arg(long, default_value=None)]
     depth: Option<u32>,
-
-    /// Add the name of a defined environment variable. Repeat to list several items
-    #[arg(long, short, default_value = None)]
-    environment: Option<Vec<String>>,
-
-    /// Add a program to the list of available programs. Repeat to list several items. 
-    /// If unset the model is free to use any program
-    #[arg(long, short, default_value = None)]
-    program: Option<Vec<String>>,
 
     #[arg(long, value_enum)]
     model: ArgModelKind,
@@ -79,6 +83,14 @@ pub struct AskArgs {
 #[derive(clap::Args, Clone)]
 #[command(author, about, long_about = None)]
 pub struct ExplainArgs {
+    /// Tell the model which OS should be assumed. Distro names are also valid.
+    #[arg(long, default_value="Linux")]
+    operating_system: String,
+
+    /// Add the name of a defined environment variable. Repeat to list several items
+    #[arg(long, default_value = None)]
+    environment: Option<Vec<String>>,
+    ///
     /// Provide the model with the current working directory.
     /// If unset the model does not get any information about what the current directory is
     #[arg(long)]
@@ -89,10 +101,6 @@ pub struct ExplainArgs {
     /// directory
     #[arg(long, default_value=None)]
     depth: Option<u32>,
-
-    /// Add the name of a defined environment variable. Repeat to list several items
-    #[arg(long, default_value = None)]
-    environment: Option<Vec<String>>,
 
     #[arg(long, value_enum)]
     model: ArgModelKind,
@@ -179,10 +187,11 @@ impl From<AskArgs> for AskConfig {
         let cwd = if value.cwd { Some(()) } else { None };
         let model = value.model.into();
         Self {
-            cwd,
-            depth: value.depth,
+            operating_system: value.operating_system,
             environment: value.environment,
             programs: value.program,
+            cwd,
+            depth: value.depth,
             model,
         }
     }
@@ -193,9 +202,10 @@ impl From<ExplainArgs> for ExplainConfig {
         let cwd = if value.cwd { Some(()) } else { None };
         let model = value.model.into();
         Self {
+            operating_system: value.operating_system,
+            environment: value.environment,
             cwd,
             depth: value.depth,
-            environment: value.environment,
             model,
         }
     }

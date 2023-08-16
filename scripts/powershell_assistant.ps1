@@ -1,3 +1,4 @@
+$os = "Windows 11"
 $model = "open-aigpt35-turbo"
 
 Set-PSReadlineKeyHandler -Key 'Alt+s' -ScriptBlock {
@@ -9,7 +10,7 @@ Set-PSReadlineKeyHandler -Key 'Alt+s' -ScriptBlock {
     # Write the buffer content to the temporary file
     $bufferState | Out-File -FilePath $tempFileName -Force
     # Run the CLI application with the temporary file
-    Start-Process shai -ArgumentList "ask --model $model --edit-file $tempFileName" -Wait
+    Start-Process shai -ArgumentList "ask --operating-system `"$os`" --model $model --edit-file $tempFileName" -Wait
     $fileContents = Get-Content -Raw -Path $tempFileName
     # # Remove the temporary file
     Remove-Item -Path $tempFileName -Force
@@ -27,7 +28,7 @@ Set-PSReadlineKeyHandler -Key 'Alt+e' -ScriptBlock {
     # Write the buffer content to the temporary file
     $bufferState | Out-File -FilePath $tempFileName -Force
     # Run the CLI application with the temporary file
-    Start-Process shai -ArgumentList "explain --model $model --edit-file $tempFileName" -Wait
+    Start-Process shai -ArgumentList "explain --operating-system `"$os`" --model $model --edit-file $tempFileName" -Wait
     $fileContents = Get-Content -Raw -Path $tempFileName
     # # Remove the temporary file
     Remove-Item -Path $tempFileName -Force
