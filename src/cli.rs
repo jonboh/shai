@@ -7,17 +7,19 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use futures::{Stream, StreamExt};
-use tui::backend::CrosstermBackend;
-use tui::layout::{Alignment, Constraint, Direction};
-use tui::style::Style;
-use tui::widgets::{Block, Borders, Paragraph, Wrap};
-use tui::Terminal;
-use tui_textarea::{Input, Key, TextArea};
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Alignment, Constraint, Direction};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::Terminal;
+use tui_input::backend::crossterm::EventHandler;
+use tui_input::Input;
 
 use crate::context::Context;
 use crate::model::Task;
@@ -285,7 +287,13 @@ fn create_explanation_paragraph<'t>(text: String, thinking: ShaiRequestProgress)
     Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL).title(title))
         .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true })
+    .wrap(Wrap { trim: true })
+}
+
+fn create_input_paragraph<'t>(text: String, title: String) -> Paragraph<'t> {
+    Paragraph::new(text)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .alignment(Alignment::Left)
 }
 
 fn create_controls_paragraph<'t>(state: ShaiControls) -> Paragraph<'t> {
@@ -305,7 +313,8 @@ pub struct ShaiUI<'t> {
     args: ShaiArgs,
     term: Terminal<CrosstermBackend<StdoutLock<'t>>>,
     layout: Layout,
-    textarea: TextArea<'t>,
+    input_text: Paragraph<'t>,
+    input: Input,
     main_response: ModelWindow<'t>,
     auxiliary_response: ModelWindow<'t>,
     controls: Paragraph<'t>,
@@ -331,9 +340,9 @@ enum Layout {
 }
 
 impl Layout {
-    fn create(&self) -> tui::layout::Layout {
+    fn create(&self) -> ratatui::layout::Layout {
         match self {
-            Layout::InputResponse => tui::layout::Layout::default()
+            Layout::InputResponse => ratatui::layout::Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
                     [
@@ -343,7 +352,7 @@ impl Layout {
                     ]
                     .as_ref(),
                 ),
-            Layout::InputResponseExplanation => tui::layout::Layout::default()
+            Layout::InputResponseExplanation => ratatui::layout::Layout::default()
                 .direction(Direction::Vertical)
                 // .constraints([Constraint::Length(2), Constraint::Min(20), Constraint::Min(20)].as_ref())
                 .constraints([
@@ -364,13 +373,8 @@ impl<'t> ShaiUI<'t> {
         let backend = CrosstermBackend::new(stdout);
         let term = Terminal::new(backend)?;
 
-        let title = match args {
-            ShaiArgs::Ask(_) => "What should shai's command do?",
-            ShaiArgs::Explain(_) => "What command should shai explain?",
-        };
-        let mut textarea = TextArea::default();
-        textarea.set_block(Block::default().borders(Borders::ALL).title(title));
-        textarea.set_cursor_line_style(Style::default());
+        let textarea = create_input_paragraph("".to_string(), Self::title(&args));
+        let input = Input::default();
         let main_response = ModelWindow {
             response: String::new(),
             paragraph: create_explanation_paragraph(String::new(), ShaiRequestProgress::Waiting),
@@ -388,7 +392,8 @@ impl<'t> ShaiUI<'t> {
             args,
             term,
             layout,
-            textarea,
+            input_text: textarea,
+            input,
             main_response,
             auxiliary_response,
             controls,
@@ -413,7 +418,8 @@ impl<'t> ShaiUI<'t> {
             .as_ref()
             .and_then(|file| fs::read_to_string(file).ok())
             .unwrap_or_default();
-        self.textarea.insert_str(&cli_text);
+        // self.textarea.insert_str(&cli_text);
+        self.input_text = create_input_paragraph(cli_text, Self::title(&self.args)); // FIX
         let write_mode = self.mainloop().await;
 
         // restore terminal mode
@@ -471,65 +477,84 @@ impl<'t> ShaiUI<'t> {
 
             self.draw()?;
 
-            match crossterm::event::read()?.into() {
-                Input {
-                    key: Key::Char('c'),
-                    ctrl: true,
-                    ..
-                } => return Ok(WriteBuffer::No),
-                Input {
-                    key: Key::Char('a'),
-                    ctrl: true,
-                    alt: true,
-                } if matches!(controls, ShaiControls::CommandGenerated) => return Ok(WriteBuffer::Raw),
-                Input {
-                    key: Key::Char('a'),
-                    ctrl: true,
-                    ..
-                } if matches!(controls, ShaiControls::CommandGenerated)=> return Ok(WriteBuffer::Yes),
-                Input {
-                    key: Key::Enter, ..
-                } => {
-                    if let RequestExit::Exit = self.send_request(RequestType::Normal).await? {
-                        return Ok(WriteBuffer::No);
+            if let Event::Key(key) = crossterm::event::read()? {
+                match key {
+                    KeyEvent {
+                        code: KeyCode::Char('c'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => return Ok(WriteBuffer::No),
+                    KeyEvent {
+                        code: KeyCode::Char('a'),
+                        modifiers: KeyModifiers::ALT, // FIX: CTRL+SHIFT
+                        ..
+                    } if matches!(controls, ShaiControls::CommandGenerated) => {
+                        return Ok(WriteBuffer::Raw)
                     }
-                }
-                Input {
-                    key: Key::Char('e'),
-                    ctrl: true,
-                    ..
-                } if matches!(controls, ShaiControls::CommandGenerated)=> {
-                    self.layout = Layout::InputResponseExplanation;
-                    if let RequestExit::Exit =
-                        self.send_request(RequestType::Auxiliary).await?
-                    {
-                        return Ok(WriteBuffer::No);
+                    KeyEvent {
+                        code: KeyCode::Char('a'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } if matches!(controls, ShaiControls::CommandGenerated) => {
+                        return Ok(WriteBuffer::Yes)
                     }
-                }
-                Input { key: Key::Tab, .. } => (),
-                input => {
-                    self.textarea.input(input);
+                    KeyEvent {
+                        code: KeyCode::Enter,
+                        ..
+                    } => {
+                        if let RequestExit::Exit = self.send_request(RequestType::Normal).await? {
+                            return Ok(WriteBuffer::No);
+                        }
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char('e'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } if matches!(controls, ShaiControls::CommandGenerated) => {
+                        self.layout = Layout::InputResponseExplanation;
+                        if let RequestExit::Exit = self.send_request(RequestType::Auxiliary).await?
+                        {
+                            return Ok(WriteBuffer::No);
+                        }
+                    }
+                    KeyEvent {
+                        code: KeyCode::Tab, ..
+                    } => (),
+                    _ => {
+                        // self.textarea.input(input);
+                        self.input.handle_event(&Event::Key(key));
+                        self.input_text = create_input_paragraph(
+                            self.input.value().to_string(),
+                            Self::title(&self.args),
+                        );
+                    }
                 }
             }
         }
     }
 
     fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.term.draw(|f| match &self.layout {
-            Layout::InputResponse => {
-                let layout = self.layout.create();
-                let chunks = layout.split(f.size());
-                f.render_widget(self.textarea.widget(), chunks[0]);
-                f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
-                f.render_widget(self.controls.clone(), chunks[2])
-            }
-            Layout::InputResponseExplanation => {
-                let layout = self.layout.create();
-                let chunks = layout.split(f.size());
-                f.render_widget(self.textarea.widget(), chunks[0]);
-                f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
-                f.render_widget(self.auxiliary_response.paragraph.clone(), chunks[2]);
-                f.render_widget(self.controls.clone(), chunks[3])
+        self.term.draw(|f| {
+            let layout = self.layout.create();
+            let chunks = layout.split(f.size());
+            let width = chunks[0].width.max(3) - 3; // keep 2 for borders and 1 for cursor 
+            let scroll = self.input.visual_scroll(width as usize);
+            f.render_widget(self.input_text.clone().scroll((0, scroll as u16)), chunks[0]);
+            f.set_cursor(
+                chunks[0].x 
+                + (self.input.visual_cursor().max(scroll) - scroll) as u16 
+                + 1,
+                chunks[0].y + 1);
+            match &self.layout {
+                Layout::InputResponse => {
+                    f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
+                    f.render_widget(self.controls.clone(), chunks[2])
+                }
+                Layout::InputResponseExplanation => {
+                    f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
+                    f.render_widget(self.auxiliary_response.paragraph.clone(), chunks[2]);
+                    f.render_widget(self.controls.clone(), chunks[3])
+                }
             }
         })?;
         Ok(())
@@ -553,7 +578,7 @@ impl<'t> ShaiUI<'t> {
         };
         let context = Context::from(config);
         let user_prompt = match request_type {
-            RequestType::Normal => self.textarea.lines().join("\n"),
+            RequestType::Normal => self.input.value().to_string(),
             RequestType::Auxiliary => self.main_response.response.clone(),
         };
         let request_task = tokio::spawn(model_stream_request(
@@ -570,14 +595,18 @@ impl<'t> ShaiUI<'t> {
             match state {
                 RequestState::WaitRequest => {
                     if crossterm::event::poll(Duration::from_millis(100))? {
-                        match crossterm::event::read()?.into() {
-                            Input { key: Key::Esc, .. } => return Ok(RequestExit::Cancel),
-                            Input {
-                                key: Key::Char('c'),
-                                ctrl: true,
-                                ..
-                            } => return Ok(RequestExit::Exit),
-                            _ => (),
+                        if let Event::Key(key) = crossterm::event::read()? {
+                            match key {
+                                KeyEvent {
+                                    code: KeyCode::Esc, ..
+                                } => return Ok(RequestExit::Cancel),
+                                KeyEvent {
+                                    code: KeyCode::Char('c'),
+                                    modifiers: KeyModifiers::CONTROL,
+                                    ..
+                                } => return Ok(RequestExit::Exit),
+                                _ => (),
+                            }
                         }
                     }
                     if request_task.is_finished() {
@@ -615,14 +644,18 @@ impl<'t> ShaiUI<'t> {
             self.append_message_response(&message?, request_type);
             self.draw()?;
             if crossterm::event::poll(Duration::from_millis(100))? {
-                match crossterm::event::read()?.into() {
-                    Input {
-                        key: Key::Char('c'),
-                        ctrl: true,
-                        ..
-                    } => return Ok(RequestExit::Exit),
-                    Input { key: Key::Esc, .. } => return Ok(RequestExit::Cancel),
-                    _ => (),
+                if let Event::Key(key) = crossterm::event::read()? {
+                    match key {
+                        KeyEvent {
+                            code: KeyCode::Char('c'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        } => return Ok(RequestExit::Exit),
+                        KeyEvent {
+                            code: KeyCode::Esc, ..
+                        } => return Ok(RequestExit::Cancel),
+                        _ => (),
+                    }
                 }
             }
         }
@@ -658,6 +691,14 @@ impl<'t> ShaiUI<'t> {
                 .auxiliary_response
                 .update(new, ShaiRequestProgress::Waiting),
         }
+    }
+
+    fn title(args: &ShaiArgs) -> String {
+        match args {
+            ShaiArgs::Ask(_) => "What should shai's command do?",
+            ShaiArgs::Explain(_) => "What command should shai explain?",
+        }
+        .to_string()
     }
 }
 
