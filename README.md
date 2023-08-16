@@ -140,7 +140,7 @@ When a command is generated the following controls are also available:
 - `Ctrl+a` : Accept generated command
     - This will check that the model followed the format instructions, when the model provides a long answer
         this shortcut will retrieve only the text inside markdown code blocks.
-- `Ctrl+A` : Accept generated command (raw)
+- `Ctrl+r` : Accept generated command (raw)
     - This will accept the input from the model without any check
 - `Ctrl+e` : Explain generated command
     - This will generate an explanation for the command that Shai has just generated.

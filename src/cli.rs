@@ -484,8 +484,8 @@ impl<'t> ShaiUI<'t> {
                         ..
                     } => return Ok(WriteBuffer::No),
                     KeyEvent {
-                        code: KeyCode::Char('a'),
-                        modifiers: KeyModifiers::ALT, // FIX: CTRL+SHIFT
+                        code: KeyCode::Char('r'),
+                        modifiers: KeyModifiers::CONTROL,
                         ..
                     } if matches!(controls, ShaiControls::CommandGenerated) => {
                         return Ok(WriteBuffer::Raw)
