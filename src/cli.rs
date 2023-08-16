@@ -187,11 +187,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ui.run().await?;
         }
         ShaiCLIArgs::GenerateScript(integration_args) => match integration_args.shell {
-            Shell::Bash => println!("{}", include_str!("../bash_assistant.sh")),
-            Shell::Zsh => println!("{}", include_str!("../zsh_assistant.zsh")),
-            Shell::Fish => println!("{}", include_str!("../fish_assistant.fish")),
-            Shell::Nushell => println!("{}", include_str!("../nushell_assistant.nu")),
-            Shell::PowerShell => println!("{}", include_str!("../powershell_assistant.ps1")),
+            Shell::Bash => println!("{}", include_str!("../scripts//bash_assistant.sh")),
+            Shell::Zsh => println!("{}", include_str!("../scripts/zsh_assistant.zsh")),
+            Shell::Fish => println!("{}", include_str!("../scripts/fish_assistant.fish")),
+            Shell::Nushell => println!("{}", include_str!("../scripts/nushell_assistant.nu")),
+            Shell::PowerShell => {
+                println!("{}", include_str!("../scripts/powershell_assistant.ps1"))
+            }
         },
     }
     Ok(())
