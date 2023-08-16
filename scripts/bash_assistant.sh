@@ -19,6 +19,6 @@ _explain_assistant() {
     rm -f "$tmpf"
 }
 
-# Bind <C-x> to trigger the _assistant_complete function
+# Bind to trigger the _assistant_complete function
 bind -x '"\es":_ask_assistant'
 bind -x '"\ee":_explain_assistant'
