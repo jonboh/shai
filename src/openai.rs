@@ -1,12 +1,13 @@
 use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
+use std::fmt::Display;
 use std::time::Duration;
 
 use thiserror::Error;
 
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder, StatusCode};
 
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
@@ -18,27 +19,27 @@ use crate::prompts;
 
 #[derive(Deserialize)]
 struct Message {
-    #[allow(unused)] // needed for deserialization
+    #[allow(unused)]
     pub role: GPTRole,
     pub content: String,
 }
 
 #[derive(Deserialize)]
 struct MessageEntry {
-    #[allow(unused)] // needed for deserialization
+    #[allow(unused)]
     pub index: u64,
     pub message: Message,
 }
 
 #[derive(Deserialize)]
 struct Response {
-    #[allow(unused)] // needed for deserialization
+    #[allow(unused)]
     pub id: String,
-    #[allow(unused)] // needed for deserialization
+    #[allow(unused)]
     pub object: String,
-    #[allow(unused)] // needed for deserialization
+    #[allow(unused)]
     pub created: u64,
-    #[allow(unused)] // needed for deserialization
+    #[allow(unused)]
     pub model: String,
     pub choices: Vec<MessageEntry>,
 }
@@ -57,7 +58,7 @@ pub(crate) enum OpenAIGPTModel {
     GPT35Turbo,
     GPT35Turbo_16k,
     GPT4,
-    GPT4_32k
+    GPT4_32k,
 }
 
 impl OpenAIGPTModel {
@@ -76,15 +77,38 @@ pub enum OpenAIError {
     #[error("{0}")]
     Authentication(String),
     #[error("Client failed to initialize: {0}")]
-    Client(#[from]  reqwest::Error),
+    Client(#[from] reqwest::Error),
     #[error("Stream was interrupted: {0}")]
     Stream(String),
     #[error("Failed to deserialize OpenAI model response: {0}")]
     Deserialization(String),
+    #[error("Error Response: {0}")]
+    ErrorResponse(OpenAIErrorResponse),
     #[error("An unknown error happened: {0}")]
     Unknown(String),
-
     // TODO: handle errors like billing limit reached
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAIErrorResponse {
+    error: OpenAIErrorResponseContent,
+}
+
+impl Display for OpenAIErrorResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error.message)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAIErrorResponseContent {
+    message: String,
+    #[allow(unused)]
+    r#type: Option<String>,
+    #[allow(unused)]
+    param: Option<String>,
+    #[allow(unused)]
+    code: Option<String>,
 }
 
 impl OpenAIGPTModel {
@@ -112,9 +136,9 @@ impl OpenAIGPTModel {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|err| {
-                OpenAIError::Authentication(
-                    format!("Failed to create authentication header: {err}"),
-                )
+                OpenAIError::Authentication(format!(
+                    "Failed to create authentication header: {err}"
+                ))
             })?,
         );
 
@@ -140,7 +164,9 @@ impl OpenAIGPTModel {
             .json(&body)
             .send()
             .await
-            .map_err(|err| OpenAIError::Unknown(format!("Unknown request error: {}", err.without_url())))
+            .map_err(|err| {
+                OpenAIError::Unknown(format!("Unknown request error: {}", err.without_url()))
+            })
     }
 
     pub async fn send(
@@ -151,7 +177,10 @@ impl OpenAIGPTModel {
     ) -> Result<String, OpenAIError> {
         let response = self.send_request(request, context, task, false).await?;
 
-        let response: Response = response.json().await.map_err(|err| OpenAIError::Unknown(err.to_string()))?;
+        let response: Response = response
+            .json()
+            .await
+            .map_err(|err| OpenAIError::Unknown(err.to_string()))?;
         let response_text = response.choices[0].message.content.clone();
         Ok(response_text)
     }
@@ -208,27 +237,39 @@ impl OpenAIGPTModel {
         context: Context,
         task: Task,
     ) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
-        let response = self
-            .send_request(request, context, task, true)
-            .await?
-            .bytes_stream()
-            .eventsource();
-        let message_stream = response.map(|response| {
-            let data = response.map_err(|err| OpenAIError::Stream(err.to_string()))?.data;
-            if data == "[DONE]" {
-                Ok("".to_string())
-            } else {
-                Ok(match &serde_json::from_str::<ResponseChunk>(&data)
-                    .map_err(|err| OpenAIError::Deserialization(err.to_string()))?
-                    .choices[0]
-                    .delta
-                {
-                    MessageChunk::Content { content: msg } => msg.to_string(),
-                    _ => "".to_string(),
-                })
+        let response = self.send_request(request, context, task, true).await?;
+        match response.status() {
+            StatusCode::OK => {
+                let response = response.bytes_stream().eventsource();
+                let message_stream = response.map(|response| {
+                    let data = response
+                        .map_err(|err| OpenAIError::Stream(err.to_string()))?
+                        .data;
+                    if data == "[DONE]" {
+                        Ok("".to_string())
+                    } else {
+                        Ok(
+                            match &serde_json::from_str::<ResponseChunk>(&data)
+                                .map_err(|err| OpenAIError::Deserialization(err.to_string()))?
+                                .choices[0]
+                                .delta
+                            {
+                                MessageChunk::Content { content: msg } => msg.to_string(),
+                                _ => "".to_string(),
+                            },
+                        )
+                    }
+                });
+                Ok(message_stream)
             }
-        });
-        Ok(message_stream)
+            _ => {
+                let error: OpenAIErrorResponse = response
+                        .json()
+                        .await
+                        .map_err(|err| OpenAIError::Unknown(err.to_string()))?;
+                Err(OpenAIError::ErrorResponse(error))
+            }
+        }
     }
 }
 
