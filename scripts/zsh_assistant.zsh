@@ -1,4 +1,4 @@
-model="open-aigpt4"
+model="open-aigpt35-turbo"
 
 ask-assistant() {
     VISUAL="shai ask --model $model --edit-file" zle edit-command-line
