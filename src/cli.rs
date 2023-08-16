@@ -27,11 +27,90 @@ use crate::openai::OpenAIGPTModel;
 use crate::{model_stream_request, AskConfig, ConfigKind, ExplainConfig, ModelError, ModelKind};
 
 #[derive(Parser, Clone)]
-#[command(name = "shai")]
+#[command(author, version, about, long_about = None)]
 pub enum ShaiCLIArgs {
+    /// Generate a command
+    #[command(arg_required_else_help = true)]
     Ask(AskArgs),
+    /// Explain a command
+    #[command(arg_required_else_help = true)]
     Explain(ExplainArgs),
+    /// Write to stdout the shell integration code for the provided shell
+    #[command(arg_required_else_help = true)]
     GenerateScript(IntegrationScriptArgs),
+}
+
+#[derive(clap::Args, Clone)]
+#[command(author, about, long_about = None)]
+pub struct AskArgs {
+    /// Provide the model with the current working directory.
+    /// If unset the model does not get any information about what the current directory is.
+    #[arg(long)]
+    cwd: bool,
+
+    /// Provide the model with the output of the tree command with this depth.
+    /// If unset the model does not get any information about the contents of the current
+    /// directory
+    #[arg(long, default_value=None)]
+    depth: Option<u32>,
+
+    /// Add the name of a defined environment variable. Repeat to list several items
+    #[arg(long, short, default_value = None)]
+    environment: Option<Vec<String>>,
+
+    /// Add a program to the list of available programs. Repeat to list several items. 
+    /// If unset the model is free to use any program
+    #[arg(long, short, default_value = None)]
+    program: Option<Vec<String>>,
+
+    #[arg(long, value_enum)]
+    model: ArgModelKind,
+
+    /// Write output to stdout
+    #[arg(long)]
+    write_stdout: bool,
+
+    /// Edit file from which to retrieve the state of ther buffer line and to which to write the
+    /// model response
+    #[arg(long)]
+    edit_file: Option<std::path::PathBuf>,
+}
+
+#[derive(clap::Args, Clone)]
+#[command(author, about, long_about = None)]
+pub struct ExplainArgs {
+    /// Provide the model with the current working directory.
+    /// If unset the model does not get any information about what the current directory is
+    #[arg(long)]
+    cwd: bool,
+
+    /// Provide the model with the output of the tree command with this depth.
+    /// If unset the model does not get any information about the contents of the current
+    /// directory
+    #[arg(long, default_value=None)]
+    depth: Option<u32>,
+
+    /// Add the name of a defined environment variable. Repeat to list several items
+    #[arg(long, default_value = None)]
+    environment: Option<Vec<String>>,
+
+    #[arg(long, value_enum)]
+    model: ArgModelKind,
+
+    /// Write output to stdout
+    #[arg(long)]
+    write_stdout: bool,
+
+    /// Edit file from which to retrieve the state of ther buffer line
+    #[arg(long)]
+    edit_file: Option<std::path::PathBuf>,
+}
+
+#[derive(clap::Args, Clone)]
+#[command(author, about, long_about = None)]
+pub struct IntegrationScriptArgs {
+    #[arg(long, value_enum)]
+    shell: Shell,
 }
 
 #[derive(Clone)]
@@ -84,52 +163,6 @@ impl From<ArgModelKind> for ModelKind {
     }
 }
 
-#[derive(clap::Args, Clone)]
-#[command(author, version, about, long_about = None)]
-pub struct AskArgs {
-    #[arg(long)]
-    pwd: bool,
-
-    #[arg(long, default_value=None)]
-    depth: Option<u32>,
-
-    #[arg(long, default_value = None)]
-    environment: Option<Vec<String>>,
-
-    #[arg(long, default_value = None)]
-    programs: Option<Vec<String>>,
-
-    #[arg(long, value_enum)]
-    model: ArgModelKind,
-
-    #[arg(long)]
-    write_stdout: bool,
-
-    #[arg(long)]
-    edit_file: Option<std::path::PathBuf>,
-}
-
-#[derive(clap::Args, Clone)]
-#[command(author, version, about, long_about = None)]
-pub struct ExplainArgs {
-    #[arg(long)]
-    pwd: bool,
-
-    #[arg(long, default_value=None)]
-    depth: Option<u32>,
-
-    #[arg(long, default_value = None)]
-    environment: Option<Vec<String>>,
-
-    #[arg(long, value_enum)]
-    model: ArgModelKind,
-
-    #[arg(long)]
-    write_stdout: bool,
-
-    #[arg(long)]
-    edit_file: Option<std::path::PathBuf>,
-}
 
 #[derive(clap::ValueEnum, Clone)]
 enum Shell {
@@ -140,22 +173,16 @@ enum Shell {
     PowerShell,
 }
 
-#[derive(clap::Args, Clone)]
-#[command(author, version, about, long_about = None)]
-pub struct IntegrationScriptArgs {
-    #[arg(long, value_enum)]
-    shell: Shell,
-}
 
 impl From<AskArgs> for AskConfig {
     fn from(value: AskArgs) -> Self {
-        let pwd = if value.pwd { Some(()) } else { None };
+        let cwd = if value.cwd { Some(()) } else { None };
         let model = value.model.into();
         Self {
-            pwd,
+            cwd,
             depth: value.depth,
             environment: value.environment,
-            programs: value.programs,
+            programs: value.program,
             model,
         }
     }
@@ -163,10 +190,10 @@ impl From<AskArgs> for AskConfig {
 
 impl From<ExplainArgs> for ExplainConfig {
     fn from(value: ExplainArgs) -> Self {
-        let pwd = if value.pwd { Some(()) } else { None };
+        let cwd = if value.cwd { Some(()) } else { None };
         let model = value.model.into();
         Self {
-            pwd,
+            cwd,
             depth: value.depth,
             environment: value.environment,
             model,
@@ -418,7 +445,7 @@ impl<'t> ShaiUI<'t> {
             .and_then(|file| fs::read_to_string(file).ok())
             .unwrap_or_default();
         // self.textarea.insert_str(&cli_text);
-        self.input_text = create_input_paragraph(cli_text, Self::title(&self.args)); // FIX
+        self.input_text = create_input_paragraph(cli_text, Self::title(&self.args));
         let write_mode = self.mainloop().await;
 
         // restore terminal mode

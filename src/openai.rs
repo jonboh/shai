@@ -86,7 +86,6 @@ pub enum OpenAIError {
     ErrorResponse(OpenAIErrorResponse),
     #[error("An unknown error happened: {0}")]
     Unknown(String),
-    // TODO: handle errors like billing limit reached
 }
 
 #[derive(Debug, Deserialize)]

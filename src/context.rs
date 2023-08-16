@@ -13,7 +13,7 @@ impl From<ConfigKind> for Context {
     fn from(value: ConfigKind) -> Self {
         match value {
             ConfigKind::Ask(config) => Self {
-                pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
+                pwd: config.cwd.and_then(|_| std::env::var("PWD").ok()),
                 tree: config
                     .depth
                     .and_then(|depth| get_directory_tree(depth).ok()),
@@ -21,7 +21,7 @@ impl From<ConfigKind> for Context {
                 programs: config.programs.as_ref().map(|programs| programs.join(",")),
             },
             ConfigKind::Explain(config) => Self {
-                pwd: config.pwd.and_then(|_| std::env::var("PWD").ok()),
+                pwd: config.cwd.and_then(|_| std::env::var("PWD").ok()),
                 tree: config
                     .depth
                     .and_then(|depth| get_directory_tree(depth).ok()),

@@ -29,7 +29,7 @@ impl ConfigKind {
 
 #[derive(Deserialize)]
 struct AskConfig {
-    pwd: Option<()>,
+    cwd: Option<()>,
     depth: Option<u32>,
     environment: Option<Vec<String>>,
     programs: Option<Vec<String>>,
@@ -38,7 +38,7 @@ struct AskConfig {
 
 #[derive(Deserialize)]
 struct ExplainConfig {
-    pwd: Option<()>,
+    cwd: Option<()>,
     depth: Option<u32>,
     environment: Option<Vec<String>>,
     model: ModelKind,
@@ -47,7 +47,7 @@ struct ExplainConfig {
 impl Default for AskConfig {
     fn default() -> Self {
         Self {
-            pwd: None,
+            cwd: None,
             depth: None,
             environment: None,
             programs: None,
@@ -59,7 +59,7 @@ impl Default for AskConfig {
 impl Default for ExplainConfig {
     fn default() -> Self {
         Self {
-            pwd: None,
+            cwd: None,
             depth: None,
             environment: None,
             model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
