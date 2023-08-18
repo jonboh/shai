@@ -2,6 +2,11 @@
 name = "shai"
 version = "0.1.0"
 edition = "2021"
+authors = ["jonboh"]
+description = "A shell AI assistant"
+homepage = "https://github.com/jonboh/shai"
+repository = "https://github.com/jonboh/shai"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
