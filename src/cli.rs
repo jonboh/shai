@@ -381,7 +381,7 @@ impl Layout {
                 .constraints(
                     [
                         Constraint::Length(3),
-                        Constraint::Min(10),
+                        Constraint::Min(7),
                         Constraint::Length(2),
                     ]
                     .as_ref(),
@@ -391,7 +391,7 @@ impl Layout {
                 // .constraints([Constraint::Length(2), Constraint::Min(20), Constraint::Min(20)].as_ref())
                 .constraints([
                     Constraint::Length(3),
-                    Constraint::Min(10),
+                    Constraint::Max(7),
                     Constraint::Min(10),
                     Constraint::Length(2),
                 ]),
