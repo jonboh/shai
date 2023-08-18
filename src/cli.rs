@@ -7,9 +7,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-};
+use crossterm::event::{ Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -405,7 +403,7 @@ impl<'t> ShaiUI<'t> {
     /// This function initializes Shai and eases disabling terminal raw mode in all circumstances
     fn initialization(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
         let mut stdout = io::stdout().lock();
-        crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        crossterm::execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);
         let term = Terminal::new(backend)?;
 
@@ -462,7 +460,6 @@ impl<'t> ShaiUI<'t> {
         crossterm::execute!(
             self.term.backend_mut(),
             LeaveAlternateScreen,
-            DisableMouseCapture
         )?;
         self.term.show_cursor()?;
 
