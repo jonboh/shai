@@ -409,8 +409,15 @@ impl<'t> ShaiUI<'t> {
         let backend = CrosstermBackend::new(stdout);
         let term = Terminal::new(backend)?;
 
-        let textarea = create_input_paragraph(String::new(), Self::title(&args));
-        let input = Input::default();
+        let cli_text = args
+            .edit_file()
+            .as_ref()
+            .and_then(|file| fs::read_to_string(file).ok())
+            .map(|bufstr| bufstr.trim().to_string())
+            .unwrap_or_default();
+
+        let textarea = create_input_paragraph(cli_text.clone(), Self::title(&args));
+        let input = Input::default().with_value(cli_text);
         let main_response = ModelWindow {
             response: String::new(),
             paragraph: create_explanation_paragraph(String::new(), ShaiRequestProgress::Waiting),
@@ -448,14 +455,6 @@ impl<'t> ShaiUI<'t> {
     }
 
     async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let cli_text = self
-            .args
-            .edit_file()
-            .as_ref()
-            .and_then(|file| fs::read_to_string(file).ok())
-            .unwrap_or_default();
-        // self.textarea.insert_str(&cli_text);
-        self.input_text = create_input_paragraph(cli_text, Self::title(&self.args));
         let write_mode = self.mainloop().await;
 
         // restore terminal mode
