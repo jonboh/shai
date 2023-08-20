@@ -7,7 +7,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use crossterm::event::{ Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -42,14 +42,14 @@ pub enum ShaiCLIArgs {
 #[command(author, about, long_about = None)]
 pub struct AskArgs {
     /// Tell the model which OS should be assumed. Distro names are also valid.
-    #[arg(long, default_value="Linux")]
+    #[arg(long, default_value = "Linux")]
     operating_system: String,
 
     /// Add the name of a defined environment variable. Repeat to list several items
     #[arg(long, short, default_value = None)]
     environment: Option<Vec<String>>,
 
-    /// Add a program to the list of available programs. Repeat to list several items. 
+    /// Add a program to the list of available programs. Repeat to list several items.
     /// If unset the model is free to use any program
     #[arg(long, short, default_value = None)]
     program: Option<Vec<String>>,
@@ -82,7 +82,7 @@ pub struct AskArgs {
 #[command(author, about, long_about = None)]
 pub struct ExplainArgs {
     /// Tell the model which OS should be assumed. Distro names are also valid.
-    #[arg(long, default_value="Linux")]
+    #[arg(long, default_value = "Linux")]
     operating_system: String,
 
     /// Add the name of a defined environment variable. Repeat to list several items
@@ -169,7 +169,6 @@ impl From<ArgModelKind> for ModelKind {
     }
 }
 
-
 #[derive(clap::ValueEnum, Clone)]
 enum Shell {
     Bash,
@@ -178,7 +177,6 @@ enum Shell {
     Nushell,
     PowerShell,
 }
-
 
 impl From<AskArgs> for AskConfig {
     fn from(value: AskArgs) -> Self {
@@ -226,7 +224,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Shell::Zsh => println!("{}", include_str!("../scripts/zsh_assistant.zsh")),
             Shell::Fish => println!("{}", include_str!("../scripts/fish_assistant.fish")),
             Shell::Nushell => println!("{}", include_str!("../scripts/nushell_assistant.nu")),
-            Shell::PowerShell => println!("{}", include_str!("../scripts/powershell_assistant.ps1"))
+            Shell::PowerShell => {
+                println!("{}", include_str!("../scripts/powershell_assistant.ps1"));
+            }
         },
     }
     Ok(())
@@ -259,12 +259,13 @@ enum ShaiRequestProgress {
 }
 
 #[derive(Clone, Copy)]
-enum ShaiControls {
+enum ShaiState {
     // TODO: this should set the actual controls available
     Started,
     Processing,
     ExplanationGenerated,
     CommandGenerated,
+    AuxExplanationGenerated,
 }
 
 #[derive(Clone, Copy)]
@@ -302,22 +303,29 @@ struct ModelWindow<'t> {
     pub response: String,
     pub paragraph: Paragraph<'t>,
     fidget: ShaiRequestProgress,
+    focus: bool,
 }
 
 impl ModelWindow<'_> {
-    fn update(&mut self, new: String, fidget: ShaiRequestProgress) {
+    fn update(&mut self, new: String, fidget: ShaiRequestProgress, focus: bool) {
         self.response = new.clone();
-        self.paragraph = create_explanation_paragraph(new, fidget);
+        self.focus = focus;
+        self.paragraph = create_explanation_paragraph(new, fidget, focus);
     }
 
     fn spin_fidget(&mut self) {
         self.fidget = self.fidget.next_state();
-        self.update(self.response.clone(), self.fidget);
+        self.update(self.response.clone(), self.fidget, self.focus);
     }
 }
 
-fn create_explanation_paragraph<'t>(text: String, thinking: ShaiRequestProgress) -> Paragraph<'t> {
-    let title = format!("Shai {thinking}");
+fn create_explanation_paragraph<'t>(
+    text: String,
+    thinking: ShaiRequestProgress,
+    focus: bool,
+) -> Paragraph<'t> {
+    let focus_indicator = if focus { "*" } else { "" };
+    let title = format!("Shai {thinking} {focus_indicator}");
     Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL).title(title))
         .alignment(Alignment::Left)
@@ -330,11 +338,13 @@ fn create_input_paragraph<'t>(text: String, title: String) -> Paragraph<'t> {
         .alignment(Alignment::Left)
 }
 
-fn create_controls_paragraph<'t>(state: ShaiControls) -> Paragraph<'t> {
+fn create_controls_paragraph<'t>(state: ShaiState) -> Paragraph<'t> {
     let text = match state {
-        ShaiControls::Started | ShaiControls::ExplanationGenerated =>  "<C-c>: Exit | Enter: Send Prompt".to_string(),
-        ShaiControls::Processing => "<C-c>: Exit | Esc: Cancel ".to_string(),
-        ShaiControls::CommandGenerated => "<C-c>: Exit | Enter: Send Prompt | <C-a>: Accept | <C-A>: Accept (raw) | <C-e>: Explain".to_string(),
+        ShaiState::Started=>  "<C-c>: Exit | Enter: Send Prompt".to_string(),
+        ShaiState::Processing => "<C-c>: Exit | Esc: Cancel ".to_string(),
+        ShaiState::ExplanationGenerated => "<C-c>: Exit | Enter: Send Prompt | <C-u|d>: Scroll".to_string(),
+        ShaiState::CommandGenerated => "<C-c>: Exit | Enter: Send Prompt | <C-a>: Accept | <C-A>: Accept (raw) | <C-e>: Explain".to_string(),
+        ShaiState::AuxExplanationGenerated =>"<C-c>: Exit | Enter: Send Prompt | <C-a>: Accept | <C-A>: Accept (raw) | <C-e>: Explain | <Tab>: Toggle Focus | <C-u|d>: Scroll | <S-Up|Down>: Resize explanation".to_string(),
     };
     Paragraph::new(text)
         .block(Block::default().borders(Borders::TOP))
@@ -349,8 +359,12 @@ pub struct ShaiUI<'t> {
     input_text: Paragraph<'t>,
     input: Input,
     main_response: ModelWindow<'t>,
+    main_response_scroll: u16,
+    main_response_size: u16,
     auxiliary_response: ModelWindow<'t>,
+    auxiliary_response_scroll: u16,
     controls: Paragraph<'t>,
+    focus: Focus,
 }
 
 fn extract_code_blocks(text: &str) -> Vec<String> {
@@ -373,15 +387,20 @@ enum Layout {
     InputResponseExplanation,
 }
 
+enum Focus {
+    MainResponse,
+    AuxiliaryResponse,
+}
+
 impl Layout {
-    fn create(&self) -> ratatui::layout::Layout {
+    fn create(&self, main_response_size: u16) -> ratatui::layout::Layout {
         match self {
             Self::InputResponse => ratatui::layout::Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
                     [
                         Constraint::Length(3),
-                        Constraint::Min(7),
+                        Constraint::Min(main_response_size),
                         Constraint::Length(2),
                     ]
                     .as_ref(),
@@ -391,7 +410,7 @@ impl Layout {
                 // .constraints([Constraint::Length(2), Constraint::Min(20), Constraint::Min(20)].as_ref())
                 .constraints([
                     Constraint::Length(3),
-                    Constraint::Max(7),
+                    Constraint::Length(main_response_size),
                     Constraint::Min(10),
                     Constraint::Length(2),
                 ]),
@@ -414,30 +433,46 @@ impl<'t> ShaiUI<'t> {
             .map(|bufstr| bufstr.trim().to_string())
             .unwrap_or_default();
 
-        let textarea = create_input_paragraph(cli_text.clone(), Self::title(&args));
+        let input_text = create_input_paragraph(cli_text.clone(), Self::title(&args));
         let input = Input::default().with_value(cli_text);
         let main_response = ModelWindow {
             response: String::new(),
-            paragraph: create_explanation_paragraph(String::new(), ShaiRequestProgress::Waiting),
+            paragraph: create_explanation_paragraph(
+                String::new(),
+                ShaiRequestProgress::Waiting,
+                true,
+            ),
             fidget: ShaiRequestProgress::Waiting,
+            focus: true,
         };
         let auxiliary_response = ModelWindow {
             response: String::new(),
-            paragraph: create_explanation_paragraph(String::new(), ShaiRequestProgress::Waiting),
+            paragraph: create_explanation_paragraph(
+                String::new(),
+                ShaiRequestProgress::Waiting,
+                false,
+            ),
             fidget: ShaiRequestProgress::Waiting,
+            focus: false,
         };
-        let controls = create_controls_paragraph(ShaiControls::Started);
+        let controls = create_controls_paragraph(ShaiState::Started);
 
         let layout = Layout::InputResponse;
+        let focus = Focus::MainResponse;
+
         Ok(ShaiUI {
             args,
             term,
             layout,
-            input_text: textarea,
+            input_text,
             input,
             main_response,
+            main_response_scroll: 0,
+            main_response_size: 7,
             auxiliary_response,
+            auxiliary_response_scroll: 0,
             controls,
+            focus,
         })
     }
 
@@ -457,10 +492,7 @@ impl<'t> ShaiUI<'t> {
 
         // restore terminal mode
         disable_raw_mode()?;
-        crossterm::execute!(
-            self.term.backend_mut(),
-            LeaveAlternateScreen,
-        )?;
+        crossterm::execute!(self.term.backend_mut(), LeaveAlternateScreen,)?;
         self.term.show_cursor()?;
 
         if let ShaiArgs::Ask(_) = self.args {
@@ -487,25 +519,28 @@ impl<'t> ShaiUI<'t> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn mainloop(&mut self) -> Result<WriteBuffer, Box<dyn std::error::Error>> {
         loop {
-            let controls = match self.args {
+            let state = match self.args {
                 ShaiArgs::Ask(_) => {
                     if self.main_response.response.is_empty() {
-                        ShaiControls::Started
+                        ShaiState::Started
+                    } else if self.auxiliary_response.response.is_empty() {
+                        ShaiState::CommandGenerated
                     } else {
-                        ShaiControls::CommandGenerated
+                        ShaiState::AuxExplanationGenerated
                     }
                 }
                 ShaiArgs::Explain(_) => {
                     if self.main_response.response.is_empty() {
-                        ShaiControls::Started
+                        ShaiState::Started
                     } else {
-                        ShaiControls::ExplanationGenerated
+                        ShaiState::ExplanationGenerated
                     }
                 }
             };
-            self.update_controls(controls);
+            self.update_controls(state);
 
             self.draw()?;
 
@@ -520,21 +555,24 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Char('r'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(controls, ShaiControls::CommandGenerated) => {
+                    } if matches!(state, ShaiState::CommandGenerated) => {
                         return Ok(WriteBuffer::Raw)
                     }
                     KeyEvent {
                         code: KeyCode::Char('a'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(controls, ShaiControls::CommandGenerated) => {
+                    } if matches!(state, ShaiState::CommandGenerated) => {
                         return Ok(WriteBuffer::Yes)
                     }
                     KeyEvent {
                         code: KeyCode::Enter,
                         ..
                     } => {
-                        if matches!(self.send_request(RequestType::Normal).await?, RequestExit::Exit) {
+                        if matches!(
+                            self.send_request(RequestType::Normal).await?,
+                            RequestExit::Exit
+                        ) {
                             return Ok(WriteBuffer::No);
                         }
                     }
@@ -542,18 +580,79 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Char('e'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(controls, ShaiControls::CommandGenerated) => {
+                    } if matches!(state, ShaiState::CommandGenerated) => {
                         self.layout = Layout::InputResponseExplanation;
-                        if matches!(self.send_request(RequestType::Auxiliary).await?, RequestExit::Exit)
-                        {
+                        if matches!(
+                            self.send_request(RequestType::Auxiliary).await?,
+                            RequestExit::Exit
+                        ) {
                             return Ok(WriteBuffer::No);
                         }
                     }
+                    // scroll explanation
+                    KeyEvent {
+                        code: dirchar @ KeyCode::Char('d' | 'u'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } if matches!(
+                        state,
+                        ShaiState::ExplanationGenerated | ShaiState::AuxExplanationGenerated
+                    ) =>
+                    {
+                        // NOTE: this doesnt take into account the width of the terminal.
+                        let page = u16::try_from(
+                            match self.focus {
+                                Focus::MainResponse => &self.main_response,
+                                Focus::AuxiliaryResponse => &self.auxiliary_response,
+                            }
+                            .response
+                            .lines()
+                            .count(),
+                        )?;
+                        let half_page = (page / 2).max(1);
+                        match self.focus {
+                            Focus::MainResponse => {
+                                if dirchar == KeyCode::Char('d') {
+                                    self.main_response_scroll =
+                                        (self.main_response_scroll + half_page).min(page);
+                                } else {
+                                    self.main_response_scroll =
+                                        self.main_response_scroll.saturating_sub(half_page);
+                                }
+                            }
+                            Focus::AuxiliaryResponse => {
+                                if dirchar == KeyCode::Char('d') {
+                                    self.auxiliary_response_scroll =
+                                        (self.auxiliary_response_scroll + half_page).min(page);
+                                } else {
+                                    self.auxiliary_response_scroll =
+                                        self.auxiliary_response_scroll.saturating_sub(half_page);
+                                }
+                            }
+                        }
+                    }
+                    // resize
+                    KeyEvent {
+                        code: dirchar @ (KeyCode::Up | KeyCode::Down),
+                        modifiers: KeyModifiers::SHIFT,
+                        ..
+                    } if matches!(state, ShaiState::AuxExplanationGenerated) => {
+                        if dirchar == KeyCode::Up {
+                            self.main_response_size = (self.main_response_size - 1).max(0);
+                        } else {
+                            self.main_response_size += 1;
+                        }
+                    }
+                    // toggle focus
                     KeyEvent {
                         code: KeyCode::Tab, ..
-                    } => (),
+                    } if matches!(self.layout, Layout::InputResponseExplanation) => {
+                        self.focus = match self.focus {
+                            Focus::MainResponse => Focus::AuxiliaryResponse,
+                            Focus::AuxiliaryResponse => Focus::MainResponse,
+                        }
+                    }
                     _ => {
-                        // self.textarea.input(input);
                         self.input.handle_event(&Event::Key(key));
                         self.input_text = create_input_paragraph(
                             self.input.value().to_string(),
@@ -567,26 +666,42 @@ impl<'t> ShaiUI<'t> {
 
     fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.term.draw(|f| {
-            let layout = self.layout.create();
+            let layout = self.layout.create(self.main_response_size);
             let chunks = layout.split(f.size());
             let width = chunks[0].width.max(3) - 3; // keep 2 for borders and 1 for cursor
             let scroll = self.input.visual_scroll(width as usize);
             f.render_widget(
-                self.input_text.clone().scroll((0, u16::try_from(scroll).unwrap_or_default())),
+                self.input_text
+                    .clone()
+                    .scroll((0, u16::try_from(scroll).unwrap_or_default())),
                 chunks[0],
             );
             f.set_cursor(
-                chunks[0].x + u16::try_from(self.input.visual_cursor().max(scroll) - scroll).unwrap_or_default() + 1,
+                chunks[0].x
+                    + u16::try_from(self.input.visual_cursor().max(scroll) - scroll)
+                        .unwrap_or_default()
+                    + 1,
                 chunks[0].y + 1,
+            );
+            f.render_widget(
+                self.main_response
+                    .paragraph
+                    .clone()
+                    .scroll((self.main_response_scroll, 0)),
+                chunks[1],
             );
             match &self.layout {
                 Layout::InputResponse => {
-                    f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
                     f.render_widget(self.controls.clone(), chunks[2]);
                 }
                 Layout::InputResponseExplanation => {
-                    f.render_widget(self.main_response.paragraph.clone(), chunks[1]);
-                    f.render_widget(self.auxiliary_response.paragraph.clone(), chunks[2]);
+                    f.render_widget(
+                        self.auxiliary_response
+                            .paragraph
+                            .clone()
+                            .scroll((self.auxiliary_response_scroll, 0)),
+                        chunks[2],
+                    );
                     f.render_widget(self.controls.clone(), chunks[3]);
                 }
             }
@@ -596,7 +711,6 @@ impl<'t> ShaiUI<'t> {
 
     // Source = {stdin, main_response}
     // Destination = {main_response, auxiliary_response}
-    // async fn send_request(&mut self, rou) -> Result<RequestState, Box<dyn std::error::Error>> {
     async fn send_request(
         &mut self,
         request_type: RequestType,
@@ -624,7 +738,7 @@ impl<'t> ShaiUI<'t> {
         let mut state = RequestState::WaitRequest;
 
         loop {
-            self.update_controls(ShaiControls::Processing);
+            self.update_controls(ShaiState::Processing);
             self.draw()?;
             match state {
                 RequestState::WaitRequest => {
@@ -672,7 +786,7 @@ impl<'t> ShaiUI<'t> {
         mut response_stream: impl Stream<Item = Result<String, ModelError>> + Unpin,
         request_type: RequestType,
     ) -> Result<RequestExit, Box<dyn std::error::Error>> {
-        self.update_controls(ShaiControls::Processing);
+        self.update_controls(ShaiState::Processing);
         while let Some(message) = response_stream.next().await {
             // TODO: dont block on await
             self.append_message_response(&message?, request_type);
@@ -700,16 +814,24 @@ impl<'t> ShaiUI<'t> {
         match request_type {
             RequestType::Normal => {
                 self.layout = Layout::InputResponse;
-                self.main_response
-                    .update(String::new(), ShaiRequestProgress::Waiting);
+                self.focus = Focus::MainResponse;
+                self.main_response.update(
+                    String::new(),
+                    ShaiRequestProgress::Waiting,
+                    matches!(self.focus, Focus::MainResponse),
+                );
             }
-            RequestType::Auxiliary => self
-                .auxiliary_response
-                .update(String::new(), ShaiRequestProgress::Waiting),
+            RequestType::Auxiliary => {
+                self.auxiliary_response.update(
+                    String::new(),
+                    ShaiRequestProgress::Waiting,
+                    matches!(self.focus, Focus::AuxiliaryResponse),
+                );
+            }
         }
     }
 
-    fn update_controls(&mut self, controls: ShaiControls) {
+    fn update_controls(&mut self, controls: ShaiState) {
         self.controls = create_controls_paragraph(controls);
     }
 
@@ -720,10 +842,16 @@ impl<'t> ShaiUI<'t> {
         };
         let new = format!("{old_text}{response}");
         match request_type {
-            RequestType::Normal => self.main_response.update(new, ShaiRequestProgress::Waiting),
-            RequestType::Auxiliary => self
-                .auxiliary_response
-                .update(new, ShaiRequestProgress::Waiting),
+            RequestType::Normal => self.main_response.update(
+                new,
+                ShaiRequestProgress::Waiting,
+                matches!(self.focus, Focus::MainResponse),
+            ),
+            RequestType::Auxiliary => self.auxiliary_response.update(
+                new,
+                ShaiRequestProgress::Waiting,
+                matches!(self.focus, Focus::AuxiliaryResponse),
+            ),
         }
     }
 
