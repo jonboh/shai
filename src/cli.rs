@@ -259,7 +259,6 @@ enum ShaiRequestProgress {
     S3,
 }
 
-
 #[derive(Clone, Copy)]
 enum ShaiState {
     // TODO: this should set the actual controls available
@@ -341,7 +340,6 @@ struct Response {
     request_state: ShaiRequestProgress,
 }
 
-
 pub struct ShaiUI<'t> {
     args: ShaiArgs,
     term: Terminal<CrosstermBackend<StdoutLock<'t>>>,
@@ -405,6 +403,26 @@ impl Layout {
     }
 }
 
+// NOTE: remove once 'int_roundings' hits stable
+const fn div_ceil(lhs: usize, rhs: usize) -> usize {
+    let d = lhs / rhs;
+    let r = lhs % rhs;
+    if r > 0 && rhs > 0 {
+        d + 1
+    } else {
+        d
+    }
+}
+
+// NOTE: this function provides an estimate, but the actual wrapping cuts words only on spaces
+// so this function tends to underestimate the height of the paragraph (as it assumes cuts at any
+// place, even if mid-word)
+fn estimate_text_height(text: &str, width: usize) -> usize {
+    // text.split("\n").fold(0, |acc, line| acc+line.len().div_ceil(width))
+    text.split('\n')
+        .fold(1, |acc, line| acc + div_ceil(line.len().max(1), width))
+}
+
 impl<'t> ShaiUI<'t> {
     /// This function initializes Shai and eases disabling terminal raw mode in all circumstances
     fn initialization(args: ShaiArgs) -> Result<Self, Box<dyn std::error::Error>> {
@@ -420,15 +438,14 @@ impl<'t> ShaiUI<'t> {
             .map(|bufstr| bufstr.trim().to_string())
             .unwrap_or_default();
 
-
         Ok(ShaiUI {
             args,
             term,
             layout: Layout::InputResponse,
             input_text: cli_text.clone(),
             input: Input::default().with_value(cli_text),
-            main_response: Default::default(),
-            auxiliary_response: Default::default(),
+            main_response: Response::default(),
+            auxiliary_response: Response::default(),
             main_response_size: 3,
             response_focus: Focus::MainResponse,
         })
@@ -478,7 +495,10 @@ impl<'t> ShaiUI<'t> {
     }
 
     fn state(&self) -> ShaiState {
-        match (self.main_response.request_state, self.auxiliary_response.request_state) {
+        match (
+            self.main_response.request_state,
+            self.auxiliary_response.request_state,
+        ) {
             (ShaiRequestProgress::None, ShaiRequestProgress::None) => match self.args {
                 ShaiArgs::Ask(_) => {
                     if self.main_response.text.is_empty() {
@@ -550,7 +570,11 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Char('e'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(self.state(), ShaiState::CommandGenerated | ShaiState::AuxExplanationGenerated) => {
+                    } if matches!(
+                        self.state(),
+                        ShaiState::CommandGenerated | ShaiState::AuxExplanationGenerated
+                    ) =>
+                    {
                         self.layout = Layout::InputResponseExplanation;
                         self.response_focus = Focus::AuxiliaryResponse;
                         if matches!(
@@ -570,37 +594,32 @@ impl<'t> ShaiUI<'t> {
                         ShaiState::ExplanationGenerated | ShaiState::AuxExplanationGenerated
                     ) =>
                     {
-                        // NOTE: this doesnt take into account the width of the terminal.
-                        let page = u16::try_from(
-                            match self.response_focus {
-                                Focus::MainResponse => &self.main_response.text,
-                                Focus::AuxiliaryResponse => &self.auxiliary_response.text,
-                            }
-                            .lines()
-                            .count(),
-                        )?;
-                        let half_page = (page / 2).max(1);
                         match self.response_focus {
                             Focus::MainResponse => {
                                 if dirchar == KeyCode::Char('d') {
                                     self.main_response.scroll =
-                                        (self.main_response.scroll + half_page).min(page);
+                                        self.main_response.scroll.saturating_add(1);
                                 } else {
                                     self.main_response.scroll =
-                                        self.main_response.scroll.saturating_sub(half_page);
+                                        self.main_response.scroll.saturating_sub(1);
                                 }
                             }
                             Focus::AuxiliaryResponse => {
                                 if dirchar == KeyCode::Char('d') {
                                     self.auxiliary_response.scroll =
-                                        (self.auxiliary_response.scroll + half_page).min(page);
+                                        self.auxiliary_response.scroll.saturating_add(1);
                                 } else {
                                     self.auxiliary_response.scroll =
-                                        self.auxiliary_response.scroll.saturating_sub(half_page);
+                                        self.auxiliary_response.scroll.saturating_sub(1);
                                 }
                             }
                         }
                     }
+                    KeyEvent {
+                        code: KeyCode::Char('d' | 'u'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => (),
                     // resize
                     KeyEvent {
                         code: dirchar @ (KeyCode::Up | KeyCode::Down),
@@ -608,7 +627,8 @@ impl<'t> ShaiUI<'t> {
                         ..
                     } if matches!(self.state(), ShaiState::AuxExplanationGenerated) => {
                         if dirchar == KeyCode::Up {
-                            self.main_response_size = self.main_response_size.saturating_sub(1).max(3);
+                            self.main_response_size =
+                                self.main_response_size.saturating_sub(1).max(3);
                         } else {
                             self.main_response_size += 1; // NOTE: would be better to saturate at
                                                           // max height
@@ -651,13 +671,27 @@ impl<'t> ShaiUI<'t> {
                     + 1,
                 chunks[0].y + 1,
             );
+            let main_scroll =
+                if matches!(self.main_response.request_state, ShaiRequestProgress::None) {
+                    self.main_response.scroll * chunks[1].height / 2
+                } else {
+                    let full_scroll = estimate_text_height(
+                        &self.main_response.text,
+                        (chunks[1].width.saturating_sub(2)).into(),
+                    )
+                    .saturating_sub(chunks[1].height.saturating_sub(2).into())
+                    .try_into()
+                    .unwrap_or_default();
+                    self.main_response.scroll = full_scroll / chunks[1].height * 2;
+                    full_scroll
+                };
             f.render_widget(
                 create_explanation_paragraph(
                     self.main_response.text.clone(),
                     self.main_response.request_state,
                     matches!(self.response_focus, Focus::MainResponse),
                 )
-                .scroll((self.main_response.scroll, 0)),
+                .scroll((main_scroll, 0)),
                 chunks[1],
             );
             match &self.layout {
@@ -665,14 +699,31 @@ impl<'t> ShaiUI<'t> {
                     f.render_widget(create_controls_paragraph(state), chunks[2]);
                 }
                 Layout::InputResponseExplanation => {
+                    let chunk = chunks[2];
+                    let aux_scroll = if matches!(
+                        self.auxiliary_response.request_state,
+                        ShaiRequestProgress::None
+                    ) {
+                        self.auxiliary_response.scroll * chunk.height / 2
+                    } else {
+                        let full_scroll = estimate_text_height(
+                            &self.auxiliary_response.text,
+                            (chunk.width.saturating_sub(2)).into(),
+                        )
+                        .saturating_sub(chunk.height.saturating_sub(2).into())
+                        .try_into()
+                        .unwrap_or_default();
+                        self.auxiliary_response.scroll = full_scroll / chunk.height * 2;
+                        full_scroll
+                    };
                     f.render_widget(
                         create_explanation_paragraph(
                             self.auxiliary_response.text.clone(),
                             self.auxiliary_response.request_state,
                             matches!(self.response_focus, Focus::AuxiliaryResponse),
                         )
-                        .scroll((self.auxiliary_response.scroll, 0)),
-                        chunks[2],
+                        .scroll((aux_scroll, 0)),
+                        chunk,
                     );
                     f.render_widget(create_controls_paragraph(state), chunks[3]);
                 }
@@ -694,10 +745,12 @@ impl<'t> ShaiUI<'t> {
         } else {
             match request_type {
                 RequestType::Normal => {
-                    self.main_response.request_state = self.main_response.request_state.next_state()
+                    self.main_response.request_state =
+                        self.main_response.request_state.next_state();
                 }
                 RequestType::Auxiliary => {
-                    self.auxiliary_response.request_state = self.auxiliary_response.request_state.next_state()
+                    self.auxiliary_response.request_state =
+                        self.auxiliary_response.request_state.next_state();
                 }
             }
         }
@@ -797,7 +850,7 @@ impl<'t> ShaiUI<'t> {
                     }
                 }
             }
-            self.update_request_state(request_type, false)
+            self.update_request_state(request_type, false);
         }
         Ok(RequestExit::Finished)
     }
@@ -807,11 +860,11 @@ impl<'t> ShaiUI<'t> {
             RequestType::Normal => {
                 self.layout = Layout::InputResponse;
                 self.response_focus = Focus::MainResponse;
-                self.main_response = Default::default();
-                self.auxiliary_response = Default::default();
+                self.main_response = Response::default();
+                self.auxiliary_response = Response::default();
             }
             RequestType::Auxiliary => {
-                self.auxiliary_response = Default::default();
+                self.auxiliary_response = Response::default();
             }
         }
     }
