@@ -251,11 +251,17 @@ enum RequestExit {
 
 #[derive(Copy, Clone)]
 enum ShaiRequestProgress {
-    Waiting,
+    None,
     S0,
     S1,
     S2,
     S3,
+}
+
+impl Default for ShaiRequestProgress {
+    fn default() -> Self {
+        ShaiRequestProgress::None
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -279,7 +285,7 @@ enum RequestType {
 impl ShaiRequestProgress {
     const fn next_state(self) -> Self {
         match self {
-            Self::Waiting | Self::S3 => Self::S0,
+            Self::None | Self::S3 => Self::S0,
             Self::S0 => Self::S1,
             Self::S1 => Self::S2,
             Self::S2 => Self::S3,
@@ -290,32 +296,12 @@ impl ShaiRequestProgress {
 impl Display for ShaiRequestProgress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Waiting => write!(f, ""),
+            Self::None => write!(f, ""),
             Self::S0 => write!(f, "-"),
             Self::S1 => write!(f, "\\"),
             Self::S2 => write!(f, "|"),
             Self::S3 => write!(f, "/"),
         }
-    }
-}
-
-struct ModelWindow<'t> {
-    pub response: String,
-    pub paragraph: Paragraph<'t>,
-    fidget: ShaiRequestProgress,
-    focus: bool,
-}
-
-impl ModelWindow<'_> {
-    fn update(&mut self, new: String, fidget: ShaiRequestProgress, focus: bool) {
-        self.response = new.clone();
-        self.focus = focus;
-        self.paragraph = create_explanation_paragraph(new, fidget, focus);
-    }
-
-    fn spin_fidget(&mut self) {
-        self.fidget = self.fidget.next_state();
-        self.update(self.response.clone(), self.fidget, self.focus);
     }
 }
 
@@ -352,19 +338,28 @@ fn create_controls_paragraph<'t>(state: ShaiState) -> Paragraph<'t> {
         .wrap(Wrap { trim: true })
 }
 
+struct Response {
+    text: String,
+    scroll: u16,
+    request_state: ShaiRequestProgress,
+}
+
+impl Default for Response {
+    fn default() -> Self {
+        Self { text: Default::default(), scroll: Default::default(), request_state: Default::default() }
+    }
+}
+
 pub struct ShaiUI<'t> {
     args: ShaiArgs,
     term: Terminal<CrosstermBackend<StdoutLock<'t>>>,
     layout: Layout,
-    input_text: Paragraph<'t>,
+    input_text: String,
     input: Input,
-    main_response: ModelWindow<'t>,
-    main_response_scroll: u16,
+    main_response: Response,
+    auxiliary_response: Response,
     main_response_size: u16,
-    auxiliary_response: ModelWindow<'t>,
-    auxiliary_response_scroll: u16,
-    controls: Paragraph<'t>,
-    focus: Focus,
+    response_focus: Focus,
 }
 
 fn extract_code_blocks(text: &str) -> Vec<String> {
@@ -411,7 +406,7 @@ impl Layout {
                 .constraints([
                     Constraint::Length(3),
                     Constraint::Length(main_response_size),
-                    Constraint::Min(10),
+                    Constraint::Min(3),
                     Constraint::Length(2),
                 ]),
         }
@@ -433,46 +428,17 @@ impl<'t> ShaiUI<'t> {
             .map(|bufstr| bufstr.trim().to_string())
             .unwrap_or_default();
 
-        let input_text = create_input_paragraph(cli_text.clone(), Self::title(&args));
-        let input = Input::default().with_value(cli_text);
-        let main_response = ModelWindow {
-            response: String::new(),
-            paragraph: create_explanation_paragraph(
-                String::new(),
-                ShaiRequestProgress::Waiting,
-                true,
-            ),
-            fidget: ShaiRequestProgress::Waiting,
-            focus: true,
-        };
-        let auxiliary_response = ModelWindow {
-            response: String::new(),
-            paragraph: create_explanation_paragraph(
-                String::new(),
-                ShaiRequestProgress::Waiting,
-                false,
-            ),
-            fidget: ShaiRequestProgress::Waiting,
-            focus: false,
-        };
-        let controls = create_controls_paragraph(ShaiState::Started);
-
-        let layout = Layout::InputResponse;
-        let focus = Focus::MainResponse;
 
         Ok(ShaiUI {
             args,
             term,
-            layout,
-            input_text,
-            input,
-            main_response,
-            main_response_scroll: 0,
-            main_response_size: 7,
-            auxiliary_response,
-            auxiliary_response_scroll: 0,
-            controls,
-            focus,
+            layout: Layout::InputResponse,
+            input_text: cli_text.clone(),
+            input: Input::default().with_value(cli_text),
+            main_response: Default::default(),
+            auxiliary_response: Default::default(),
+            main_response_size: 3,
+            response_focus: Focus::MainResponse,
         })
     }
 
@@ -499,49 +465,53 @@ impl<'t> ShaiUI<'t> {
             if let Some(file) = &self.args.edit_file() {
                 match write_mode? {
                     WriteBuffer::Yes => {
-                        let code_blocks = extract_code_blocks(&self.main_response.response);
+                        let code_blocks = extract_code_blocks(&self.main_response.text);
                         if code_blocks.is_empty() {
                             // the model probably obeyed the instructions
-                            fs::write(file, &self.main_response.response)?;
+                            fs::write(file, &self.main_response.text)?;
                         } else {
                             fs::write(file, code_blocks.join("\n"))?;
                         }
                     }
-                    WriteBuffer::Raw => fs::write(file, &self.main_response.response)?,
+                    WriteBuffer::Raw => fs::write(file, &self.main_response.text)?,
                     WriteBuffer::No => (),
                 }
             }
         }
         if self.args.write_stdout() {
-            let response = &self.main_response.response;
+            let response = &self.main_response.text;
             println!("{response}");
         }
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
-    async fn mainloop(&mut self) -> Result<WriteBuffer, Box<dyn std::error::Error>> {
-        loop {
-            let state = match self.args {
+    fn state(&self) -> ShaiState {
+        match (self.main_response.request_state, self.auxiliary_response.request_state) {
+            (ShaiRequestProgress::None, ShaiRequestProgress::None) => match self.args {
                 ShaiArgs::Ask(_) => {
-                    if self.main_response.response.is_empty() {
+                    if self.main_response.text.is_empty() {
                         ShaiState::Started
-                    } else if self.auxiliary_response.response.is_empty() {
+                    } else if self.auxiliary_response.text.is_empty() {
                         ShaiState::CommandGenerated
                     } else {
                         ShaiState::AuxExplanationGenerated
                     }
                 }
                 ShaiArgs::Explain(_) => {
-                    if self.main_response.response.is_empty() {
+                    if self.main_response.text.is_empty() {
                         ShaiState::Started
                     } else {
                         ShaiState::ExplanationGenerated
                     }
                 }
-            };
-            self.update_controls(state);
+            },
+            _ => ShaiState::Processing,
+        }
+    }
 
+    #[allow(clippy::too_many_lines)]
+    async fn mainloop(&mut self) -> Result<WriteBuffer, Box<dyn std::error::Error>> {
+        loop {
             self.draw()?;
 
             if let Event::Key(key) = crossterm::event::read()? {
@@ -555,14 +525,22 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Char('r'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(state, ShaiState::CommandGenerated) => {
+                    } if matches!(
+                        self.state(),
+                        ShaiState::CommandGenerated | ShaiState::AuxExplanationGenerated
+                    ) =>
+                    {
                         return Ok(WriteBuffer::Raw)
                     }
                     KeyEvent {
                         code: KeyCode::Char('a'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(state, ShaiState::CommandGenerated) => {
+                    } if matches!(
+                        self.state(),
+                        ShaiState::CommandGenerated | ShaiState::AuxExplanationGenerated
+                    ) =>
+                    {
                         return Ok(WriteBuffer::Yes)
                     }
                     KeyEvent {
@@ -580,8 +558,9 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Char('e'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(state, ShaiState::CommandGenerated) => {
+                    } if matches!(self.state(), ShaiState::CommandGenerated) => {
                         self.layout = Layout::InputResponseExplanation;
+                        self.response_focus = Focus::AuxiliaryResponse;
                         if matches!(
                             self.send_request(RequestType::Auxiliary).await?,
                             RequestExit::Exit
@@ -595,38 +574,37 @@ impl<'t> ShaiUI<'t> {
                         modifiers: KeyModifiers::CONTROL,
                         ..
                     } if matches!(
-                        state,
+                        self.state(),
                         ShaiState::ExplanationGenerated | ShaiState::AuxExplanationGenerated
                     ) =>
                     {
                         // NOTE: this doesnt take into account the width of the terminal.
                         let page = u16::try_from(
-                            match self.focus {
-                                Focus::MainResponse => &self.main_response,
-                                Focus::AuxiliaryResponse => &self.auxiliary_response,
+                            match self.response_focus {
+                                Focus::MainResponse => &self.main_response.text,
+                                Focus::AuxiliaryResponse => &self.auxiliary_response.text,
                             }
-                            .response
                             .lines()
                             .count(),
                         )?;
                         let half_page = (page / 2).max(1);
-                        match self.focus {
+                        match self.response_focus {
                             Focus::MainResponse => {
                                 if dirchar == KeyCode::Char('d') {
-                                    self.main_response_scroll =
-                                        (self.main_response_scroll + half_page).min(page);
+                                    self.main_response.scroll =
+                                        (self.main_response.scroll + half_page).min(page);
                                 } else {
-                                    self.main_response_scroll =
-                                        self.main_response_scroll.saturating_sub(half_page);
+                                    self.main_response.scroll =
+                                        self.main_response.scroll.saturating_sub(half_page);
                                 }
                             }
                             Focus::AuxiliaryResponse => {
                                 if dirchar == KeyCode::Char('d') {
-                                    self.auxiliary_response_scroll =
-                                        (self.auxiliary_response_scroll + half_page).min(page);
+                                    self.auxiliary_response.scroll =
+                                        (self.auxiliary_response.scroll + half_page).min(page);
                                 } else {
-                                    self.auxiliary_response_scroll =
-                                        self.auxiliary_response_scroll.saturating_sub(half_page);
+                                    self.auxiliary_response.scroll =
+                                        self.auxiliary_response.scroll.saturating_sub(half_page);
                                 }
                             }
                         }
@@ -636,28 +614,26 @@ impl<'t> ShaiUI<'t> {
                         code: dirchar @ (KeyCode::Up | KeyCode::Down),
                         modifiers: KeyModifiers::SHIFT,
                         ..
-                    } if matches!(state, ShaiState::AuxExplanationGenerated) => {
+                    } if matches!(self.state(), ShaiState::AuxExplanationGenerated) => {
                         if dirchar == KeyCode::Up {
-                            self.main_response_size = (self.main_response_size - 1).max(0);
+                            self.main_response_size = self.main_response_size.saturating_sub(1).max(3);
                         } else {
-                            self.main_response_size += 1;
+                            self.main_response_size += 1; // NOTE: would be better to saturate at
+                                                          // max height
                         }
                     }
                     // toggle focus
                     KeyEvent {
                         code: KeyCode::Tab, ..
                     } if matches!(self.layout, Layout::InputResponseExplanation) => {
-                        self.focus = match self.focus {
+                        self.response_focus = match self.response_focus {
                             Focus::MainResponse => Focus::AuxiliaryResponse,
                             Focus::AuxiliaryResponse => Focus::MainResponse,
                         }
                     }
                     _ => {
                         self.input.handle_event(&Event::Key(key));
-                        self.input_text = create_input_paragraph(
-                            self.input.value().to_string(),
-                            Self::title(&self.args),
-                        );
+                        self.input_text = self.input.value().to_string();
                     }
                 }
             }
@@ -665,14 +641,14 @@ impl<'t> ShaiUI<'t> {
     }
 
     fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let state = self.state();
         self.term.draw(|f| {
             let layout = self.layout.create(self.main_response_size);
             let chunks = layout.split(f.size());
             let width = chunks[0].width.max(3) - 3; // keep 2 for borders and 1 for cursor
             let scroll = self.input.visual_scroll(width as usize);
             f.render_widget(
-                self.input_text
-                    .clone()
+                create_input_paragraph(self.input_text.clone(), Self::title(&self.args))
                     .scroll((0, u16::try_from(scroll).unwrap_or_default())),
                 chunks[0],
             );
@@ -684,29 +660,55 @@ impl<'t> ShaiUI<'t> {
                 chunks[0].y + 1,
             );
             f.render_widget(
-                self.main_response
-                    .paragraph
-                    .clone()
-                    .scroll((self.main_response_scroll, 0)),
+                create_explanation_paragraph(
+                    self.main_response.text.clone(),
+                    self.main_response.request_state,
+                    matches!(self.response_focus, Focus::MainResponse),
+                )
+                .scroll((self.main_response.scroll, 0)),
                 chunks[1],
             );
             match &self.layout {
                 Layout::InputResponse => {
-                    f.render_widget(self.controls.clone(), chunks[2]);
+                    f.render_widget(create_controls_paragraph(state), chunks[2]);
                 }
                 Layout::InputResponseExplanation => {
                     f.render_widget(
-                        self.auxiliary_response
-                            .paragraph
-                            .clone()
-                            .scroll((self.auxiliary_response_scroll, 0)),
+                        create_explanation_paragraph(
+                            self.auxiliary_response.text.clone(),
+                            self.auxiliary_response.request_state,
+                            matches!(self.response_focus, Focus::AuxiliaryResponse),
+                        )
+                        .scroll((self.auxiliary_response.scroll, 0)),
                         chunks[2],
                     );
-                    f.render_widget(self.controls.clone(), chunks[3]);
+                    f.render_widget(create_controls_paragraph(state), chunks[3]);
                 }
             }
         })?;
         Ok(())
+    }
+
+    fn update_request_state(&mut self, request_type: RequestType, finished: bool) {
+        if finished {
+            match request_type {
+                RequestType::Normal => {
+                    self.main_response.request_state = ShaiRequestProgress::None;
+                }
+                RequestType::Auxiliary => {
+                    self.auxiliary_response.request_state = ShaiRequestProgress::None;
+                }
+            }
+        } else {
+            match request_type {
+                RequestType::Normal => {
+                    self.main_response.request_state = self.main_response.request_state.next_state()
+                }
+                RequestType::Auxiliary => {
+                    self.auxiliary_response.request_state = self.auxiliary_response.request_state.next_state()
+                }
+            }
+        }
     }
 
     // Source = {stdin, main_response}
@@ -727,7 +729,7 @@ impl<'t> ShaiUI<'t> {
         let context = Context::from(config);
         let user_prompt = match request_type {
             RequestType::Normal => self.input.value().to_string(),
-            RequestType::Auxiliary => self.main_response.response.clone(),
+            RequestType::Auxiliary => self.main_response.text.clone(),
         };
         let request_task = tokio::spawn(model_stream_request(
             model.clone(),
@@ -735,35 +737,34 @@ impl<'t> ShaiUI<'t> {
             context.clone(),
             task,
         ));
-        let mut state = RequestState::WaitRequest;
+        let mut reqstate = RequestState::WaitRequest;
 
-        loop {
-            self.update_controls(ShaiState::Processing);
+        let ret = loop {
             self.draw()?;
-            match state {
+            match reqstate {
                 RequestState::WaitRequest => {
                     if crossterm::event::poll(Duration::from_millis(100))? {
                         if let Event::Key(key) = crossterm::event::read()? {
                             match key {
                                 KeyEvent {
                                     code: KeyCode::Esc, ..
-                                } => return Ok(RequestExit::Cancel),
+                                } => break Ok(RequestExit::Cancel),
                                 KeyEvent {
                                     code: KeyCode::Char('c'),
                                     modifiers: KeyModifiers::CONTROL,
                                     ..
-                                } => return Ok(RequestExit::Exit),
+                                } => break Ok(RequestExit::Exit),
                                 _ => (),
                             }
                         }
                     }
                     if request_task.is_finished() {
-                        state = RequestState::Streaming;
+                        reqstate = RequestState::Streaming;
                         self.clear_response(request_type);
                     }
                 }
                 RequestState::Streaming => {
-                    return self
+                    break self
                         .stream_response(
                             request_task
                                 .await?
@@ -774,11 +775,10 @@ impl<'t> ShaiUI<'t> {
                         .await
                 }
             }
-            match request_type {
-                RequestType::Normal => self.main_response.spin_fidget(),
-                RequestType::Auxiliary => self.auxiliary_response.spin_fidget(),
-            }
-        }
+            self.update_request_state(request_type, false);
+        };
+        self.update_request_state(request_type, true);
+        ret
     }
 
     async fn stream_response(
@@ -786,7 +786,6 @@ impl<'t> ShaiUI<'t> {
         mut response_stream: impl Stream<Item = Result<String, ModelError>> + Unpin,
         request_type: RequestType,
     ) -> Result<RequestExit, Box<dyn std::error::Error>> {
-        self.update_controls(ShaiState::Processing);
         while let Some(message) = response_stream.next().await {
             // TODO: dont block on await
             self.append_message_response(&message?, request_type);
@@ -806,6 +805,7 @@ impl<'t> ShaiUI<'t> {
                     }
                 }
             }
+            self.update_request_state(request_type, false)
         }
         Ok(RequestExit::Finished)
     }
@@ -814,44 +814,25 @@ impl<'t> ShaiUI<'t> {
         match request_type {
             RequestType::Normal => {
                 self.layout = Layout::InputResponse;
-                self.focus = Focus::MainResponse;
-                self.main_response.update(
-                    String::new(),
-                    ShaiRequestProgress::Waiting,
-                    matches!(self.focus, Focus::MainResponse),
-                );
+                self.response_focus = Focus::MainResponse;
+                self.main_response = Default::default();
+                self.auxiliary_response = Default::default();
             }
             RequestType::Auxiliary => {
-                self.auxiliary_response.update(
-                    String::new(),
-                    ShaiRequestProgress::Waiting,
-                    matches!(self.focus, Focus::AuxiliaryResponse),
-                );
+                self.auxiliary_response = Default::default();
             }
         }
     }
 
-    fn update_controls(&mut self, controls: ShaiState) {
-        self.controls = create_controls_paragraph(controls);
-    }
-
     fn append_message_response(&mut self, response: &str, request_type: RequestType) {
         let old_text = match request_type {
-            RequestType::Normal => &self.main_response.response,
-            RequestType::Auxiliary => &self.auxiliary_response.response,
+            RequestType::Normal => &self.main_response.text,
+            RequestType::Auxiliary => &self.auxiliary_response.text,
         };
         let new = format!("{old_text}{response}");
         match request_type {
-            RequestType::Normal => self.main_response.update(
-                new,
-                ShaiRequestProgress::Waiting,
-                matches!(self.focus, Focus::MainResponse),
-            ),
-            RequestType::Auxiliary => self.auxiliary_response.update(
-                new,
-                ShaiRequestProgress::Waiting,
-                matches!(self.focus, Focus::AuxiliaryResponse),
-            ),
+            RequestType::Normal => self.main_response.text = new,
+            RequestType::Auxiliary => self.auxiliary_response.text = new,
         }
     }
 
