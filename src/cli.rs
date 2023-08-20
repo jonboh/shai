@@ -558,7 +558,7 @@ impl<'t> ShaiUI<'t> {
                         code: KeyCode::Char('e'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
-                    } if matches!(self.state(), ShaiState::CommandGenerated) => {
+                    } if matches!(self.state(), ShaiState::CommandGenerated | ShaiState::AuxExplanationGenerated) => {
                         self.layout = Layout::InputResponseExplanation;
                         self.response_focus = Focus::AuxiliaryResponse;
                         if matches!(
