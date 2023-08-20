@@ -249,8 +249,9 @@ enum RequestExit {
     Finished,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 enum ShaiRequestProgress {
+    #[default]
     None,
     S0,
     S1,
@@ -258,11 +259,6 @@ enum ShaiRequestProgress {
     S3,
 }
 
-impl Default for ShaiRequestProgress {
-    fn default() -> Self {
-        ShaiRequestProgress::None
-    }
-}
 
 #[derive(Clone, Copy)]
 enum ShaiState {
