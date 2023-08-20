@@ -334,17 +334,13 @@ fn create_controls_paragraph<'t>(state: ShaiState) -> Paragraph<'t> {
         .wrap(Wrap { trim: true })
 }
 
+#[derive(Default)]
 struct Response {
     text: String,
     scroll: u16,
     request_state: ShaiRequestProgress,
 }
 
-impl Default for Response {
-    fn default() -> Self {
-        Self { text: Default::default(), scroll: Default::default(), request_state: Default::default() }
-    }
-}
 
 pub struct ShaiUI<'t> {
     args: ShaiArgs,
