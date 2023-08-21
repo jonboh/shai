@@ -61,7 +61,7 @@ yay -S shai
 ```
 
 ##### Other
-Use the [latest release] in this github repo.
+Use the [latest release](https://github.com/jonboh/shai/releases/latest) in this github repo.
 Put the binary in a location that is included in your `PATH`, source the corresponding integration
 shell script (see [next section](#shell-integration)) in your rc file and you should be good to go.
 
