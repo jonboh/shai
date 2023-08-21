@@ -1,4 +1,5 @@
 set os "Linux" # use your distro to get more specific instructions
+set shell "Fish"
 set model "open-aigpt35-turbo"
 
 function ask_assistant --description 'Edit command in Shai'
@@ -14,7 +15,7 @@ function ask_assistant --description 'Edit command in Shai'
 
     set -l p (commandline -C)
     commandline -b > $f
-    shai ask --operating-system "$os" --model $model --edit-file $f
+    shai ask --operating-system "$os" --shell "$shell" --model $model --edit-file $f
 
     commandline -r (cat $f)
     commandline -C $p
@@ -34,7 +35,7 @@ function explain_assistant --description 'Let Shai explain this command'
 
     set -l p (commandline -C)
     commandline -b > $f
-    shai explain --operating-system "$os" --model $model --edit-file $f
+    shai explain --operating-system "$os" --shell "$shell" --model $model --edit-file $f
 
     commandline -r (cat $f)
     commandline -C $p

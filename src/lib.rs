@@ -30,6 +30,7 @@ impl ConfigKind {
 #[derive(Deserialize)]
 struct AskConfig {
     operating_system: String,
+    shell: String,
     environment: Option<Vec<String>>,
     programs: Option<Vec<String>>,
     cwd: Option<()>,
@@ -40,6 +41,7 @@ struct AskConfig {
 #[derive(Deserialize)]
 struct ExplainConfig {
     operating_system: String,
+    shell: String,
     environment: Option<Vec<String>>,
     model: ModelKind,
     cwd: Option<()>,
@@ -50,6 +52,7 @@ impl Default for AskConfig {
     fn default() -> Self {
         Self {
             operating_system: "Linux".to_string(),
+            shell: "Bash".to_string(),
             environment: None,
             programs: None,
             cwd: None,
@@ -63,6 +66,7 @@ impl Default for ExplainConfig {
     fn default() -> Self {
         Self {
             operating_system: "Linux".to_string(),
+            shell: "Bash".to_string(),
             environment: None,
             cwd: None,
             depth: None,

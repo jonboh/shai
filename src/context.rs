@@ -6,6 +6,7 @@ pub struct Context {
     pwd: Option<String>,
     tree: Option<String>,
     operating_system: String,
+    shell: String,
     environment: Option<String>,
     programs: Option<String>,
 }
@@ -19,6 +20,7 @@ impl From<ConfigKind> for Context {
                     .depth
                     .and_then(|depth| get_directory_tree(depth).ok()),
                 operating_system: config.operating_system,
+                shell: config.shell,
                 environment: config.environment.as_ref().map(|env| env.join(",")),
                 programs: config.programs.as_ref().map(|programs| programs.join(",")),
             },
@@ -28,6 +30,7 @@ impl From<ConfigKind> for Context {
                     .depth
                     .and_then(|depth| get_directory_tree(depth).ok()),
                 operating_system: config.operating_system,
+                shell: config.shell,
                 environment: config.environment.as_ref().map(|env| env.join(",")),
                 programs: None,
             },
@@ -39,6 +42,7 @@ impl From<Context> for String {
     fn from(value: Context) -> Self {
         Self::new() 
             + &format!("The system you are running is a {} machine.\n", value.operating_system)
+            + &format!("The shell you are running is {}. You are allowed to use {} specific features. ", value.shell, value.shell)
             + &value.pwd.map_or(Self::new(), |cwd| format!("You are currently in folder: {cwd}\n"))
             + &value.tree.map_or(Self::new(), |tree|format!("The tree command run in the current folder gave this output: {tree}\n"))
             + &value.environment.map_or(Self::new(), |env| format!("The following environment variables are defined: {env}\n"))

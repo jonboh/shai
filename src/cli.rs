@@ -45,6 +45,11 @@ pub struct AskArgs {
     #[arg(long, default_value = "Linux")]
     operating_system: String,
 
+    /// Tell the model which Shell shold be assumed. This can make the model use shell specific
+    /// features
+    #[arg(long, default_value = "Bash")]
+    shell: String,
+
     /// Add the name of a defined environment variable. Repeat to list several items
     #[arg(long, short, default_value = None)]
     environment: Option<Vec<String>>,
@@ -84,6 +89,11 @@ pub struct ExplainArgs {
     /// Tell the model which OS should be assumed. Distro names are also valid.
     #[arg(long, default_value = "Linux")]
     operating_system: String,
+
+    /// Tell the model which Shell shold be assumed. This can make the model use shell specific
+    /// features
+    #[arg(long, default_value = "Bash")]
+    shell: String,
 
     /// Add the name of a defined environment variable. Repeat to list several items
     #[arg(long, default_value = None)]
@@ -184,6 +194,7 @@ impl From<AskArgs> for AskConfig {
         let model = value.model.into();
         Self {
             operating_system: value.operating_system,
+            shell: value.shell,
             environment: value.environment,
             programs: value.program,
             cwd,
@@ -199,6 +210,7 @@ impl From<ExplainArgs> for ExplainConfig {
         let model = value.model.into();
         Self {
             operating_system: value.operating_system,
+            shell: value.shell,
             environment: value.environment,
             cwd,
             depth: value.depth,
