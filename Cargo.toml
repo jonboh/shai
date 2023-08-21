@@ -7,6 +7,8 @@ description = "A shell AI assistant"
 homepage = "https://github.com/jonboh/shai"
 repository = "https://github.com/jonboh/shai"
 license = "MIT"
+keywords = ["cli", "AI", "LLM", "assistant"]
+categories = ["command-line-utilities"]
 
 exclude = ["assets/*"]
 
