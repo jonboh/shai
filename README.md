@@ -97,9 +97,9 @@ command edition capabilities of the shell treating Shai as a text editor.
 
 If you just install the binary you can generate the integration script using shai
 ```bash
-shai --generate-script <your-shell, one of {bash, zsh, fish, nushell, powershell}>
+shai generate-script --shell <your-shell, one of {bash, zsh, fish, nushell, powershell}>
 # e.g
-shai --generate-script zsh > zsh_assistant.zsh
+shai generate-script --shell zsh > zsh_assistant.zsh
 # then in your .zshrc
 source zsh_assistant.zsh
 ```
