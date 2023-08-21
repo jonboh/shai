@@ -5,7 +5,7 @@ a command line interface. It has two main ways to achieve this.
 - Command Explanation: Given a command Shai will explain what a command will do and its side effects.
 
 You'll probably interact with Shai primarily in its command generation mode.
-![main example](./assets/blame_git.gif)
+![main example](./assets/git.gif)
 
 You can also ask Shai to explain the command it just generated:
 ![explain generated command](./assets/explanation.gif)
@@ -23,9 +23,10 @@ In addition, if the command is potentially dangerous the model will usually poin
 As a backend you can use any of the following OpenAI models:
 - GPT-3.5-turbo
 - GPT-3.5-turbo-16k
-    - This might be anecdotal, but I've sometimes experienced lower latencies for the larger context models
 - GPT-4
 - GPT-4-32k
+
+This might be anecdotal, but I've sometimes experienced lower latencies with the larger context models.
 
 For the time being I don't have access to the gpt-4 models API, but they should work if your account
 does have access. All examples have been generated with GPT-3.5-turbo, so I expect the results from
@@ -40,39 +41,22 @@ by no means foolproof, and the best results are usually achieved when you as an 
 the terminology and capabilities related to the command you want to generate. It can also be a resource
 to explain commands taken from tutorials or forums.
 
-## Examples
-### Git
-![Get the commit hash in which a string was introduced](./assets/git_log_insert_string.png)
-![Get the commit hash of the commits that include string](./assets/git_message_grep.png)
-![Get the commit hash of the commits that modify a file](./assets/git_hashes_file.png)
-
-
-### Miscellaneous
-Run bash on a running container:
-![run bash on a running container](./assets/docker_exec.gif)
-
-Make a ssh tunnel:
-![SSH Tunnel](./assets/ssh_tunnel.png)
-
-Simple ffmpeg operations:
-![Make a GIF from a video file](./assets/ffmpeg_gif.png)
-
-Discard command output:
-![Discard output of a terminal](./assets/discard_output.gif)
-
 
 ## Installation
 ##### Cargo
-```shell
+```bash
 cargo install shai
 ```
 Remember to add `.cargo/bin` to your `PATH`.
+
+This method should be available for all platforms, but you'll need to have Cargo installed, use 
+[rustup](https://rustup.rs/) to install it.
 
 Note: See the [next section](#shell-integration) to integrate shai and allow it 
 to interact with your buffer line.
 
 ##### Arch Linux. AUR:
-```shell
+```bash
 yay -S shai
 ```
 
@@ -112,7 +96,7 @@ command edition capabilities of the shell treating Shai as a text editor.
 | PowerShell      | `powershell_assistant.ps1` |
 
 If you just install the binary you can generate the integration script using shai
-```shell
+```bash
 shai --generate-script <your-shell, one of {bash, zsh, fish, nushell, powershell}>
 # e.g
 shai --generate-script zsh > zsh_assistant.zsh
@@ -123,8 +107,8 @@ Remember to source the resulting script in you rc, otherwise you won't have the 
 
 Depending on what model you use you might need to provide the API key as an environment variable. For the OpenAI models
 you could set it with:
-```
-export OPENAI_API_KEY=$(<command to get API key>)
+```bash
+export OPENAI_API_KEY=$(<command_to_get_API_key>)
 # if you have it on a text file
 export OPENAI_API_KEY=$(cat ~/.secrets/chatgpt.key)
 ```
@@ -156,6 +140,28 @@ When a command is generated the following controls are also available:
 
 These keybinds cannot currently be changed.
 
+
+## Examples
+### Git
+![Get the commit hash in which a string was introduced](./assets/git_log_insert_string.png)
+![Get the commit hash of the commits that include string](./assets/git_message_grep.png)
+![Get the commit hash of the commits that modify a file](./assets/git_hashes_file.png)
+
+
+### Miscellaneous
+Run bash on a running container:
+![run bash on a running container](./assets/docker_exec.gif)
+
+Make a ssh tunnel:
+![SSH Tunnel](./assets/ssh_tunnel.png)
+
+Simple ffmpeg operations, or command modifications:
+![Make a GIF from a video file](./assets/ffmpeg_gif.png)
+![Modify a ffmpeg command](./assets/modify_ffmpeg.png)
+
+Discard command output:
+![Discard output of a terminal](./assets/discard_output.gif)
+
 ## Current Status
 At the moment Shai is memoryless, when you send a prompt it is sent to the model without any
 context from your previous prompts. The purpose of Shai is not to be a conversational application but
@@ -173,6 +179,11 @@ You can modify the assumed Operating System or distro to get more relevant resul
 is provided in the `--operating-system` option. You can modify your integration script with the appropriate
 value.
 
+In the same way the `--shell` option lets the model know in which shell it is running, this can help the model
+use shell specific features. However, for modern shells like `nushell` this can actually confuse the model as it won't
+have a lot of information about this shell in its training data. In cases like this it might be better to
+let the model believe it is running on another shell (like `bash`).
+
 #### Experimental Options
 Initially I envisioned Shai as a more capable assistant to which context about the current state
 of your machine could be forwarded, and it would act accordingly. There are some options that are
@@ -180,10 +191,10 @@ disabled by default:
 
 | Option           | Description                                                                                                  |
 | ---------------- | ---------------                                                                                              |
-| `pwd`              | Provides the model with the current working directory                                                        |
-| `depth`            | depth with which to run the `tree` command. It provides context about ther current directory and its content |
-| `environment`      | The list of environment variables set (only their name is passed to the model)                               |
-| `programs`      | The list of available programs to the model with which to complete the task                                  |
+| `pwd`            | Provides the model with the current working directory                                                        |
+| `depth`          | depth with which to run the `tree` command. It provides context about ther current directory and its content |
+| `environment`    | The list of environment variables set (only their name is passed to the model)                               |
+| `programs`       | The list of available programs to the model with which to complete the task                                  |
 
 
 I have found that the performance of the GPT3.5 model is lacking in this respect. I have
