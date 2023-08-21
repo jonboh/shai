@@ -8,6 +8,8 @@ homepage = "https://github.com/jonboh/shai"
 repository = "https://github.com/jonboh/shai"
 license = "MIT"
 
+exclude = ["assets/*"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
