@@ -14,7 +14,7 @@ _ask_assistant() {
 _explain_assistant() {
     tmpf="$(mktemp)"
     printf '%s\n' "$READLINE_LINE" > "$tmpf"
-    "shai" "explain" "--operating-system" "$os" "--shell" "$shell" "--model" "$model""--edit-file" "$tmpf"
+    "shai" "explain" "--operating-system" "$os" "--shell" "$shell" "--model" "$model" "--edit-file" "$tmpf"
     READLINE_LINE="$(<"$tmpf")"
     READLINE_POINT="${#READLINE_LINE}"
     rm -f "$tmpf"
