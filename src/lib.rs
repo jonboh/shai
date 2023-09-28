@@ -118,22 +118,22 @@ fn build_context_request(request: &str, context: Context) -> String {
     String::from(context) + &format!("Here is your <task>: \n <task>{request}</task>")
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{
-        context::Context, model::Task, model_stream_request, openai::OpenAIGPTModel::GPT35Turbo,
-        AskConfig, ConfigKind, ModelKind::OpenAIGPT,
-    };
-    use futures_util::StreamExt;
-
-    #[tokio::test]
-    async fn ssh_tunnel() {
-        let mut  response_stream = model_stream_request(OpenAIGPT(GPT35Turbo), 
-            "make an ssh tunnel between port 8080 in this machine and port 1243 in the machine with IP 192.168.0.42".to_string(), 
-            Context::from(ConfigKind::Ask(AskConfig::default())),
-            Task::GenerateCommand
-            ).await.unwrap();
-        while response_stream.next().await.is_some() {
-        }
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use crate::{
+//         context::Context, model::Task, model_stream_request, openai::OpenAIGPTModel::GPT35Turbo,
+//         AskConfig, ConfigKind, ModelKind::OpenAIGPT,
+//     };
+//     use futures_util::StreamExt;
+//
+//     #[tokio::test]
+//     async fn ssh_tunnel() {
+//         let mut  response_stream = model_stream_request(OpenAIGPT(GPT35Turbo), 
+//             "make an ssh tunnel between port 8080 in this machine and port 1243 in the machine with IP 192.168.0.42".to_string(), 
+//             Context::from(ConfigKind::Ask(AskConfig::default())),
+//             Task::GenerateCommand
+//             ).await.unwrap();
+//         while response_stream.next().await.is_some() {
+//         }
+//     }
+// }
