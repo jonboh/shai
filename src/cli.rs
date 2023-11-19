@@ -166,6 +166,7 @@ enum ArgModelKind {
     OpenAIGPT35Turbo_16k,
     OpenAIGPT4,
     OpenAIGPT4_32k,
+    OpenAIGPT4_1106,
 }
 
 impl From<ArgModelKind> for ModelKind {
@@ -175,6 +176,7 @@ impl From<ArgModelKind> for ModelKind {
             ArgModelKind::OpenAIGPT35Turbo_16k => Self::OpenAIGPT(OpenAIGPTModel::GPT35Turbo_16k),
             ArgModelKind::OpenAIGPT4 => Self::OpenAIGPT(OpenAIGPTModel::GPT4),
             ArgModelKind::OpenAIGPT4_32k => Self::OpenAIGPT(OpenAIGPTModel::GPT4_32k),
+            ArgModelKind::OpenAIGPT4_1106 => Self::OpenAIGPT(OpenAIGPTModel::GPT4_1106_preview),
         }
     }
 }

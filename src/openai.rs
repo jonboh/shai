@@ -59,6 +59,7 @@ pub enum OpenAIGPTModel {
     GPT35Turbo_16k,
     GPT4,
     GPT4_32k,
+    GPT4_1106_preview,
 }
 
 impl OpenAIGPTModel {
@@ -68,6 +69,7 @@ impl OpenAIGPTModel {
             Self::GPT35Turbo_16k => "gpt-3.5-turbo-16k".to_string(),
             Self::GPT4 => "gpt-4".to_string(),
             Self::GPT4_32k => "gpt-4-32k".to_string(),
+            Self::GPT4_1106_preview => "gpt-4-1106-preview".to_string(),
         }
     }
 }
