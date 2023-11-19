@@ -482,9 +482,10 @@ impl<'t> ShaiUI<'t> {
         crossterm::execute!(self.term.backend_mut(), LeaveAlternateScreen,)?;
         self.term.show_cursor()?;
 
+        let write_mode = write_mode?;
         if let ShaiArgs::Ask(_) = self.args {
             if let Some(file) = &self.args.edit_file() {
-                match write_mode? {
+                match write_mode {
                     WriteBuffer::Yes => {
                         let code_blocks = extract_code_blocks(&self.main_response.text);
                         if code_blocks.is_empty() {
