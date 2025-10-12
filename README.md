@@ -49,16 +49,11 @@ cargo install shai
 ```
 Remember to add `.cargo/bin` to your `PATH`.
 
-This method should be available for all platforms, but you'll need to have Cargo installed, use 
+This method should be available for all platforms, but you'll need to have Cargo installed, use
 [rustup](https://rustup.rs/) to install it.
 
-Note: See the [next section](#shell-integration) to integrate shai and allow it 
+Note: See the [next section](#shell-integration) to integrate shai and allow it
 to interact with your buffer line.
-
-##### Arch Linux. AUR:
-```bash
-yay -S shai
-```
 
 ##### Other
 Use the [latest release](https://github.com/jonboh/shai/releases/latest) in this github repo.
