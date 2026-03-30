@@ -19,6 +19,7 @@ use ratatui::Terminal;
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
+use crate::anthropic::AnthropicModel;
 use crate::context::Context;
 use crate::model::Task;
 use crate::openai::OpenAIGPTModel;
@@ -162,21 +163,56 @@ impl From<ShaiArgs> for ConfigKind {
 #[derive(clap::ValueEnum, Clone)]
 #[allow(non_camel_case_types)]
 enum ArgModelKind {
-    OpenAIGPT35Turbo,
-    OpenAIGPT35Turbo_16k,
+    // OpenAI GPT-4.1 series
+    OpenAIGPT4_1,
+    OpenAIGPT4_1Mini,
+    OpenAIGPT4_1Nano,
+    // OpenAI GPT-4o series
+    OpenAIGPT4o,
+    OpenAIGPT4oMini,
+    // OpenAI o-series reasoning models
+    OpenAIO3,
+    OpenAIO3Mini,
+    OpenAIO4Mini,
+    OpenAIO1,
+    // OpenAI GPT-4 Turbo / legacy
+    OpenAIGPT4Turbo,
     OpenAIGPT4,
-    OpenAIGPT4_32k,
-    OpenAIGPT4_1106,
+    // Anthropic Claude 4.6 (latest)
+    AnthropicClaudeOpus46,
+    AnthropicClaudeSonnet46,
+    AnthropicClaudeHaiku45,
+    // Anthropic Claude 4.5
+    AnthropicClaudeOpus45,
+    AnthropicClaudeSonnet45,
+    // Anthropic Claude 4 / 4.1
+    AnthropicClaudeOpus4,
+    AnthropicClaudeSonnet4,
+    AnthropicClaudeOpus41,
 }
 
 impl From<ArgModelKind> for ModelKind {
     fn from(value: ArgModelKind) -> Self {
         match value {
-            ArgModelKind::OpenAIGPT35Turbo => Self::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
-            ArgModelKind::OpenAIGPT35Turbo_16k => Self::OpenAIGPT(OpenAIGPTModel::GPT35Turbo_16k),
+            ArgModelKind::OpenAIGPT4_1 => Self::OpenAIGPT(OpenAIGPTModel::GPT4_1),
+            ArgModelKind::OpenAIGPT4_1Mini => Self::OpenAIGPT(OpenAIGPTModel::GPT4_1Mini),
+            ArgModelKind::OpenAIGPT4_1Nano => Self::OpenAIGPT(OpenAIGPTModel::GPT4_1Nano),
+            ArgModelKind::OpenAIGPT4o => Self::OpenAIGPT(OpenAIGPTModel::GPT4o),
+            ArgModelKind::OpenAIGPT4oMini => Self::OpenAIGPT(OpenAIGPTModel::GPT4oMini),
+            ArgModelKind::OpenAIO3 => Self::OpenAIGPT(OpenAIGPTModel::O3),
+            ArgModelKind::OpenAIO3Mini => Self::OpenAIGPT(OpenAIGPTModel::O3Mini),
+            ArgModelKind::OpenAIO4Mini => Self::OpenAIGPT(OpenAIGPTModel::O4Mini),
+            ArgModelKind::OpenAIO1 => Self::OpenAIGPT(OpenAIGPTModel::O1),
+            ArgModelKind::OpenAIGPT4Turbo => Self::OpenAIGPT(OpenAIGPTModel::GPT4Turbo),
             ArgModelKind::OpenAIGPT4 => Self::OpenAIGPT(OpenAIGPTModel::GPT4),
-            ArgModelKind::OpenAIGPT4_32k => Self::OpenAIGPT(OpenAIGPTModel::GPT4_32k),
-            ArgModelKind::OpenAIGPT4_1106 => Self::OpenAIGPT(OpenAIGPTModel::GPT4_1106_preview),
+            ArgModelKind::AnthropicClaudeOpus46 => Self::Anthropic(AnthropicModel::ClaudeOpus46),
+            ArgModelKind::AnthropicClaudeSonnet46 => Self::Anthropic(AnthropicModel::ClaudeSonnet46),
+            ArgModelKind::AnthropicClaudeHaiku45 => Self::Anthropic(AnthropicModel::ClaudeHaiku45),
+            ArgModelKind::AnthropicClaudeOpus45 => Self::Anthropic(AnthropicModel::ClaudeOpus45),
+            ArgModelKind::AnthropicClaudeSonnet45 => Self::Anthropic(AnthropicModel::ClaudeSonnet45),
+            ArgModelKind::AnthropicClaudeOpus4 => Self::Anthropic(AnthropicModel::ClaudeOpus4),
+            ArgModelKind::AnthropicClaudeSonnet4 => Self::Anthropic(AnthropicModel::ClaudeSonnet4),
+            ArgModelKind::AnthropicClaudeOpus41 => Self::Anthropic(AnthropicModel::ClaudeOpus41),
         }
     }
 }
@@ -826,10 +862,7 @@ impl<'t> ShaiUI<'t> {
                 RequestState::Streaming => {
                     break self
                         .stream_response(
-                            request_task
-                                .await?
-                                .map_err(|err| ModelError::Error(Box::new(err)))?
-                                .map(|each| each.map_err(|err| ModelError::Error(Box::new(err)))),
+                            request_task.await??,
                             request_type,
                         )
                         .await

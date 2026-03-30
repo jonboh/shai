@@ -1,15 +1,18 @@
 #![allow(clippy::future_not_send)]
 
+pub(crate) mod anthropic;
 pub mod cli;
 mod context;
 mod model;
 mod openai;
 mod prompts;
+pub(crate) mod sse_parser;
 
+use anthropic::AnthropicModel;
 use context::Context;
 use futures::Stream;
 use model::Task;
-use openai::{OpenAIError, OpenAIGPTModel};
+use openai::OpenAIGPTModel;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -57,7 +60,7 @@ impl Default for AskConfig {
             programs: None,
             cwd: None,
             depth: None,
-            model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
+            model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT4oMini),
         }
     }
 }
@@ -70,7 +73,7 @@ impl Default for ExplainConfig {
             environment: None,
             cwd: None,
             depth: None,
-            model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT35Turbo),
+            model: ModelKind::OpenAIGPT(OpenAIGPTModel::GPT4oMini),
         }
     }
 }
@@ -78,14 +81,21 @@ impl Default for ExplainConfig {
 #[derive(Deserialize, Clone)]
 enum ModelKind {
     OpenAIGPT(OpenAIGPTModel),
+    Anthropic(AnthropicModel),
     // OpenAssistant // waiting for a minimal API, go guys :D
     // Local // ?
 }
 
 #[derive(Debug, Error)]
-enum ModelError {
-    #[error("ModelError: {0}")]
-    Error(#[from] Box<dyn std::error::Error>),
+pub(crate) enum ModelError {
+    #[error("{0}")]
+    Error(String),
+}
+
+impl From<Box<dyn std::error::Error + Send>> for ModelError {
+    fn from(e: Box<dyn std::error::Error + Send>) -> Self {
+        Self::Error(e.to_string())
+    }
 }
 
 #[allow(unused)]
@@ -99,7 +109,11 @@ async fn model_request(
         ModelKind::OpenAIGPT(model) => model
             .send(request, context, task)
             .await
-            .map_err(|err| ModelError::Error(Box::new(err))),
+            .map_err(|err| ModelError::Error(err.to_string())),
+        ModelKind::Anthropic(model) => model
+            .send(request, context, task)
+            .await
+            .map_err(|err| ModelError::Error(err.to_string())),
     }
 }
 
@@ -108,9 +122,16 @@ async fn model_stream_request(
     request: String,
     context: Context,
     task: Task,
-) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
+) -> Result<impl Stream<Item = Result<String, ModelError>> + Send, ModelError> {
     match model {
-        ModelKind::OpenAIGPT(model) => model.send_streaming(request, context, task).await,
+        ModelKind::OpenAIGPT(model) => model
+            .send_streaming(request, context, task)
+            .await
+            .map_err(|e| ModelError::Error(e.to_string())),
+        ModelKind::Anthropic(model) => model
+            .send_streaming(request, context, task)
+            .await
+            .map_err(|e| ModelError::Error(e.to_string())),
     }
 }
 

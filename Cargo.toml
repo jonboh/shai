@@ -1,6 +1,6 @@
 [package]
 name = "shai"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["jonboh"]
 description = "A shell AI assistant"
@@ -14,24 +14,32 @@ exclude = ["assets/*"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# Run integration tests that make real API calls. Requires OPENAI_API_KEY and/or
+# ANTHROPIC_API_KEY environment variables to be set.
+#   cargo test --features live-api-tests
+live-api-tests = []
+
 [dependencies]
 clap = { version = "4.3", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.22"
 serde_json = "1.0"
-reqwest = {version = "0.11", features = ["json", "stream"]}
+reqwest = { version = "0.11", features = ["json", "stream"] }
 
-eventsource-stream = { version = "0.2.3" }
 futures = { version = "0.3.28" }
 futures-util = { version = "0.3.28" }
 bytes = "1.4"
 
 
-ratatui = { version = "0.22.0", features = ["all-widgets"]}
+ratatui = { version = "0.22.0", features = ["all-widgets"] }
 tui-input = "0.8"
-crossterm = {version = "0.27", features = ["event-stream"]}
-tokio = {version = "1.29", features = ["rt", "rt-multi-thread", "macros"]}
-thiserror = {version = "1.0"}
+crossterm = { version = "0.27", features = ["event-stream"] }
+tokio = { version = "1.29", features = ["rt", "rt-multi-thread", "macros"] }
+thiserror = { version = "1.0" }
 
-regex = {version = "1.9"}
-lazy_static = {version = "1.4"}
+regex = { version = "1.9" }
+lazy_static = { version = "1.4" }
+
+[dev-dependencies]
+dotenvy = "0.15"

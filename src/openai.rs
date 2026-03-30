@@ -1,4 +1,3 @@
-use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
 use std::fmt::Display;
@@ -9,13 +8,14 @@ use thiserror::Error;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, ClientBuilder, StatusCode};
 
-use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 
 use crate::build_context_request;
 use crate::context::Context;
 use crate::model::Task;
 use crate::prompts;
+use crate::sse_parser::ModelStream;
+use crate::ModelError;
 
 #[derive(Deserialize)]
 struct Message {
@@ -54,36 +54,55 @@ enum GPTRole {
 
 #[derive(Deserialize, Clone)]
 #[allow(non_camel_case_types)]
-pub enum OpenAIGPTModel {
-    GPT35Turbo,
-    GPT35Turbo_16k,
+pub(crate) enum OpenAIGPTModel {
+    // GPT-4.1 series
+    GPT4_1,
+    GPT4_1Mini,
+    GPT4_1Nano,
+    // GPT-4o series
+    GPT4o,
+    GPT4oMini,
+    // o-series reasoning models (do not support the temperature parameter)
+    O3,
+    O3Mini,
+    O4Mini,
+    O1,
+    // GPT-4 Turbo
+    GPT4Turbo,
     GPT4,
-    GPT4_32k,
-    GPT4_1106_preview,
 }
 
 impl OpenAIGPTModel {
     fn api_name(&self) -> String {
         match self {
-            Self::GPT35Turbo => "gpt-3.5-turbo".to_string(),
-            Self::GPT35Turbo_16k => "gpt-3.5-turbo-16k".to_string(),
+            Self::GPT4_1 => "gpt-4.1".to_string(),
+            Self::GPT4_1Mini => "gpt-4.1-mini".to_string(),
+            Self::GPT4_1Nano => "gpt-4.1-nano".to_string(),
+            Self::GPT4o => "gpt-4o".to_string(),
+            Self::GPT4oMini => "gpt-4o-mini".to_string(),
+            Self::O3 => "o3".to_string(),
+            Self::O3Mini => "o3-mini".to_string(),
+            Self::O4Mini => "o4-mini".to_string(),
+            Self::O1 => "o1".to_string(),
+            Self::GPT4Turbo => "gpt-4-turbo".to_string(),
             Self::GPT4 => "gpt-4".to_string(),
-            Self::GPT4_32k => "gpt-4-32k".to_string(),
-            Self::GPT4_1106_preview => "gpt-4-1106-preview".to_string(),
         }
+    }
+
+    /// Returns true for o-series reasoning models that do not accept a `temperature` parameter.
+    const fn is_o_series(&self) -> bool {
+        matches!(self, Self::O1 | Self::O3 | Self::O3Mini | Self::O4Mini)
     }
 }
 
 #[derive(Debug, Error)]
-pub enum OpenAIError {
+pub(crate) enum OpenAIError {
     #[error("{0}")]
     Authentication(String),
     #[error("Client failed to initialize: {0}")]
     Client(#[from] reqwest::Error),
     #[error("Stream was interrupted: {0}")]
     Stream(String),
-    #[error("Failed to deserialize OpenAI model response: {0}")]
-    Deserialization(String),
     #[error("Error Response: {0}")]
     ErrorResponse(OpenAIErrorResponse),
     #[error("An unknown error happened: {0}")]
@@ -91,7 +110,7 @@ pub enum OpenAIError {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OpenAIErrorResponse {
+pub(crate) struct OpenAIErrorResponse {
     error: OpenAIErrorResponseContent,
 }
 
@@ -102,7 +121,7 @@ impl Display for OpenAIErrorResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OpenAIErrorResponseContent {
+struct OpenAIErrorResponseContent {
     message: String,
     #[allow(unused)]
     r#type: Option<String>,
@@ -149,15 +168,18 @@ impl OpenAIGPTModel {
             Task::GenerateCommand => prompts::ASK_MODEL_TASK,
             Task::Explain => prompts::EXPLAIN_MODEL_TASK,
         };
-        let body = json!({
+
+        let mut body = json!({
             "model": self.api_name(),
             "messages": [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": context_request}
             ],
-            "temperature": 0,
             "stream": streaming,
         });
+        if !self.is_o_series() {
+            body["temperature"] = json!(0);
+        }
 
         client
             .post(url)
@@ -170,13 +192,21 @@ impl OpenAIGPTModel {
             })
     }
 
-    pub async fn send(
+    pub(crate) async fn send(
         &self,
         request: String,
         context: Context,
         task: Task,
     ) -> Result<String, OpenAIError> {
         let response = self.send_request(request, context, task, false).await?;
+
+        if response.status() != StatusCode::OK {
+            let error: OpenAIErrorResponse = response
+                .json()
+                .await
+                .map_err(|err| OpenAIError::Unknown(err.to_string()))?;
+            return Err(OpenAIError::ErrorResponse(error));
+        }
 
         let response: Response = response
             .json()
@@ -231,36 +261,45 @@ enum MessageChunk {
     Stop {},
 }
 
+/// Provider-specific parser for OpenAI SSE data payloads.
+/// Extracts text content from streaming chat completion chunks.
+fn parse_openai_message(json_str: &str) -> Result<Vec<String>, String> {
+    let chunk: ResponseChunk =
+        serde_json::from_str(json_str).map_err(|e| format!("OpenAI JSON parse error: {e}"))?;
+    let texts = chunk
+        .choices
+        .iter()
+        .filter_map(|c| {
+            if let MessageChunk::Content { content } = &c.delta {
+                if !content.is_empty() {
+                    return Some(content.clone());
+                }
+            }
+            None
+        })
+        .collect();
+    Ok(texts)
+}
+
+impl From<String> for OpenAIError {
+    fn from(s: String) -> Self {
+        Self::Stream(s)
+    }
+}
+
 impl OpenAIGPTModel {
-    pub async fn send_streaming(
+    pub(crate) async fn send_streaming(
         &self,
         request: String,
         context: Context,
         task: Task,
-    ) -> Result<impl Stream<Item = Result<String, OpenAIError>>, OpenAIError> {
+    ) -> Result<ModelStream<ModelError>, OpenAIError> {
         let response = self.send_request(request, context, task, true).await?;
         if response.status() == StatusCode::OK {
-            let response = response.bytes_stream().eventsource();
-            let message_stream = response.map(|response| {
-                let data = response
-                    .map_err(|err| OpenAIError::Stream(err.to_string()))?
-                    .data;
-                if data == "[DONE]" {
-                    Ok(String::new())
-                } else {
-                    Ok(
-                        match &serde_json::from_str::<ResponseChunk>(&data)
-                            .map_err(|err| OpenAIError::Deserialization(err.to_string()))?
-                            .choices[0]
-                            .delta
-                        {
-                            MessageChunk::Content { content: msg } => msg.to_string(),
-                            _ => String::new(),
-                        },
-                    )
-                }
-            });
-            Ok(message_stream)
+            let byte_stream: std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, String>> + Send>> =
+                Box::pin(response.bytes_stream().map(|r| r.map_err(|e| e.to_string())));
+            let err_map: fn(String) -> ModelError = |s| ModelError::Error(s);
+            Ok(ModelStream::new(byte_stream, parse_openai_message, err_map))
         } else {
             let error: OpenAIErrorResponse = response
                 .json()
@@ -274,6 +313,8 @@ impl OpenAIGPTModel {
 #[cfg(test)]
 mod tests {
     use super::{Choice, MessageChunk, ResponseChunk};
+    #[cfg(feature = "live-api-tests")]
+    use super::OpenAIGPTModel;
 
     #[test]
     fn empty_delta_deserialization() {
@@ -291,5 +332,189 @@ mod tests {
     fn stop_message() {
         let raw_response = r#"{"id":"chatcmpl","object":"chat.completion.chunk","created":9999,"model":"gpt-3.5-turbo-0613","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#;
         serde_json::from_str::<ResponseChunk>(raw_response).unwrap();
+    }
+
+    /// Integration tests that make real OpenAI API calls.
+    /// Requires the `live-api-tests` feature and a valid `OPENAI_API_KEY` env var.
+    ///
+    ///   cargo test --features live-api-tests openai_live
+    #[cfg(feature = "live-api-tests")]
+    mod live {
+        use super::OpenAIGPTModel;
+        use crate::context::Context;
+        use crate::model::Task;
+        use crate::{AskConfig, ConfigKind};
+        use futures_util::StreamExt;
+
+        const PROMPT: &str = "list files in current directory";
+
+        fn default_context() -> Context {
+            dotenvy::dotenv().ok();
+            Context::from(ConfigKind::Ask(AskConfig::default()))
+        }
+
+        /// Helper that calls `send` and asserts the response is non-empty.
+        async fn assert_send(model: OpenAIGPTModel) {
+            dotenvy::dotenv().ok();
+            let result = model
+                .send(PROMPT.to_string(), default_context(), Task::GenerateCommand)
+                .await;
+            assert!(
+                result.is_ok(),
+                "model {} send failed: {:?}",
+                model.api_name(),
+                result.err()
+            );
+            assert!(
+                !result.unwrap().is_empty(),
+                "model {} returned an empty response",
+                model.api_name()
+            );
+        }
+
+        /// Helper that calls `send_streaming`, drains the stream, and asserts the
+        /// concatenated response is non-empty.
+        async fn assert_send_streaming(model: OpenAIGPTModel) {
+            dotenvy::dotenv().ok();
+            let stream = model
+                .send_streaming(PROMPT.to_string(), default_context(), Task::GenerateCommand)
+                .await;
+            assert!(
+                stream.is_ok(),
+                "model {} streaming failed to start: {:?}",
+                model.api_name(),
+                stream.err()
+            );
+            let response: String = stream
+                .unwrap()
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .map(|chunk| chunk.expect("stream chunk error"))
+                .collect();
+            assert!(
+                !response.is_empty(),
+                "model {} returned an empty streaming response",
+                model.api_name()
+            );
+        }
+
+        // --- GPT-4.1 series ---
+
+        #[tokio::test]
+        async fn gpt4_1_send() {
+            assert_send(OpenAIGPTModel::GPT4_1).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_1_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4_1).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_1_mini_send() {
+            assert_send(OpenAIGPTModel::GPT4_1Mini).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_1_mini_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4_1Mini).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_1_nano_send() {
+            assert_send(OpenAIGPTModel::GPT4_1Nano).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_1_nano_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4_1Nano).await;
+        }
+
+        // --- GPT-4o series ---
+
+        #[tokio::test]
+        async fn gpt4o_send() {
+            assert_send(OpenAIGPTModel::GPT4o).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4o_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4o).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4o_mini_send() {
+            assert_send(OpenAIGPTModel::GPT4oMini).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4o_mini_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4oMini).await;
+        }
+
+        // --- o-series reasoning models ---
+
+        #[tokio::test]
+        async fn o1_send() {
+            assert_send(OpenAIGPTModel::O1).await;
+        }
+
+        #[tokio::test]
+        async fn o1_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::O1).await;
+        }
+
+        #[tokio::test]
+        async fn o3_send() {
+            assert_send(OpenAIGPTModel::O3).await;
+        }
+
+        #[tokio::test]
+        async fn o3_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::O3).await;
+        }
+
+        #[tokio::test]
+        async fn o3_mini_send() {
+            assert_send(OpenAIGPTModel::O3Mini).await;
+        }
+
+        #[tokio::test]
+        async fn o3_mini_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::O3Mini).await;
+        }
+
+        #[tokio::test]
+        async fn o4_mini_send() {
+            assert_send(OpenAIGPTModel::O4Mini).await;
+        }
+
+        #[tokio::test]
+        async fn o4_mini_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::O4Mini).await;
+        }
+
+        // --- GPT-4 Turbo / legacy ---
+
+        #[tokio::test]
+        async fn gpt4_turbo_send() {
+            assert_send(OpenAIGPTModel::GPT4Turbo).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_turbo_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4Turbo).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_send() {
+            assert_send(OpenAIGPTModel::GPT4).await;
+        }
+
+        #[tokio::test]
+        async fn gpt4_send_streaming() {
+            assert_send_streaming(OpenAIGPTModel::GPT4).await;
+        }
     }
 }
